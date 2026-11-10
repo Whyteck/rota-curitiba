@@ -510,7 +510,15 @@ function render(){
       ctx.beginPath(); pts.forEach(([x,y],i)=>{const [px,py]=w2s(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py);});
       if(l.type==='ride'){ ctx.setLineDash([]); ctx.strokeStyle=MS.halo; ctx.lineWidth=9; ctx.stroke(); ctx.strokeStyle=routeColor(D.pats[l.p].route); ctx.lineWidth=6; ctx.stroke(); }
       else { ctx.setLineDash([2,6]); ctx.strokeStyle=MS.walk; ctx.lineWidth=3.5; ctx.stroke(); ctx.setLineDash([]); }
-      if(l.type==='ride'){ for(const [x,y] of [pts[0],pts[pts.length-1]]){ const [px,py]=w2s(x,y); ctx.fillStyle=MS.stopFill; ctx.strokeStyle=MS.ink; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(px,py,5,0,7); ctx.fill(); ctx.stroke(); } }
+      if(l.type==='ride'){
+        // every stop the bus passes on this ride: small dots on the line
+        const S=D.pats[l.p].stops, col=routeColor(D.pats[l.p].route), rr=view.s>0.6?5:4.2;
+        const li=it.legs.indexOf(l); let nx=null; for(let j=li+1;j<it.legs.length;j++){ const m=it.legs[j]; if(m.type==='walk'&&m.hide)continue; nx=m; break; }
+        const contNext=!!(nx&&nx.type==='ride'&&nx.cont);
+        for(let pos=(l.cont?l.fromPos:l.fromPos+1);pos<(contNext?l.toPos+1:l.toPos);pos++){ const [mx,my]=markerPos(S[pos]); const [px,py]=w2s(mx,my); if(px<-10||px>W+10||py<-10||py>H+10)continue;
+          ctx.fillStyle='#fff'; ctx.strokeStyle=col; ctx.lineWidth=2.2; ctx.beginPath(); ctx.arc(px,py,rr,0,7); ctx.fill(); ctx.stroke(); }
+        const ends=[]; if(!l.cont) ends.push(pts[0]); if(!contNext) ends.push(pts[pts.length-1]);
+        for(const [x,y] of ends){ const [px,py]=w2s(x,y); ctx.fillStyle=MS.stopFill; ctx.strokeStyle=MS.ink; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(px,py,6.5,0,7); ctx.fill(); ctx.stroke(); } }
     } }
   // selected stop
   if(state.stopSel&&view.s<=0.9){ for(const s of state.stopSel.stops){ const [px,py]=w2s(...markerPos(s)); ctx.strokeStyle='#0b7a4b'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(px,py,9,0,7); ctx.stroke(); } }
