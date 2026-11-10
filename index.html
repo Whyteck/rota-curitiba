@@ -83,6 +83,11 @@ button,input,select{font:inherit;color:inherit}
 .leg .d{padding-bottom:12px}
 .leg .d b{font-weight:600}
 .leg .d small{color:var(--muted);display:block}
+.stopsBtn{display:inline-block;margin-top:4px;border:1px solid var(--line);background:var(--field);color:var(--ink);border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600;cursor:pointer}
+.leg.mid{font-size:12px;color:var(--muted)}
+.leg.mid .t{font-weight:500;color:var(--muted)}
+.leg.mid .d{padding-bottom:7px}
+.leg.mid .bar:after{width:6px;height:6px;left:4px;top:5px;border-width:2px}
 .next{color:var(--muted);font-size:12px}
 .more{display:flex;gap:6px;justify-content:center;margin:8px 10px}
 .dep{display:flex;align-items:flex-start;gap:8px;padding:8px 14px;border-top:1px solid var(--sep)}
@@ -720,7 +725,8 @@ function renderResults(){
       <div class="opt sel nohover"><div class="top"><span class="tt">${fmt(it.start)} → ${fmt(it.end)}</span>${it.tag?`<span class="otag">${it.tag}</span>`:''}</div><div class="dur" style="margin-top:2px">${itinMeta(it)}</div><div class="chips">${itinChips(it)}</div>${legsHTML(it)}</div>
       <div class="foot">Times are URBS scheduled times. Times between URBS timing points are estimated from distance, and buses can run early or late in traffic.</div>`;
     $('back').onclick=()=>{ state.view='list'; renderResults(); };
-    b.scrollTop=0; draw(); return; }
+    b.querySelectorAll('.stopsBtn').forEach(btn=>btn.onclick=()=>{ const k=+btn.dataset.k; if(!state.openLegs) state.openLegs=new Set(); state.openLegs.has(k)?state.openLegs.delete(k):state.openLegs.add(k); const st=b.scrollTop; renderResults(); b.scrollTop=st; });
+    draw(); return; }
   b.innerHTML=`<div class="lhint">${state.itins.length} option${state.itins.length>1?'s':''}${state.arriveBy!=null?' arriving by '+fmt(state.arriveBy):''} · tap one for details</div>`+state.itins.map((it,i)=>{
     const firstRide=it.legs.find(l=>l.type==='ride');
     return `<div class="opt ${i===state.sel?'sel':''}" data-i="${i}"><div class="top"><span class="tt">${fmt(it.start)} → ${fmt(it.end)}</span>${it.tag?`<span class="otag">${it.tag}</span>`:''}</div>
@@ -729,7 +735,7 @@ function renderResults(){
       <div class="go">Details ›</div></div>`;
   }).join('') + `<div class="more"><button class="btn ghost" id="earlier">Earlier</button><button class="btn ghost" id="later">Later departures</button></div>`;
   b.querySelectorAll('.opt').forEach(el=>{
-    el.onclick=()=>{ state.sel=+el.dataset.i; state.view='detail'; renderResults(); fitItin(); };
+    el.onclick=()=>{ state.sel=+el.dataset.i; state.view='detail'; state.openLegs=new Set(); renderResults(); $('body').scrollTop=0; fitItin(); };
     el.onmouseenter=()=>{ if(state.view!=='list')return; state.sel=+el.dataset.i; b.querySelectorAll('.opt').forEach(o=>o.classList.toggle('sel',o===el)); draw(); };
   });
   $('later').onclick=()=>{ const f=state.itins.filter(it=>!it.walkOnly).sort((a,b)=>a.start-b.start)[0]; plan(f? f.start+60 : state.t0+600); };
@@ -749,13 +755,19 @@ function legsHTML(it){
       const same=from===to; const m=Math.round(l.dur*WALK/DETOUR/10)*10;
       h+=`<div class="leg"><div class="t">${fmt(l.start)}</div><div class="bar walk" style="--c:var(--walk)"></div><div class="d"><b>${l.from==='orig'?esc(from):(same?'Change platform':'Walk')}</b><small>🚶 ${same?'Inside '+esc(to)+', ':'Walk '}${Math.max(1,Math.round(l.dur/60))} min${m>=20&&!same?` (~${m} m) to ${esc(to)}`:''}</small></div></div>`;
     } else {
-      const P=D.pats[l.p], r=D.routes[P.route]; const n=l.toPos-l.fromPos;
+      if(l.cont) return;                                   // merged into the ride it continues
+      // this ride plus any "same bus continues" segments that follow it
+      const segs=[l]; for(let j=i+1;j<L.length;j++){ const m=L[j]; if(m.type==='walk'&&m.hide) continue; if(m.type==='ride'&&m.cont){ segs.push(m); continue; } break; }
+      const P=D.pats[l.p], r=D.routes[P.route], last=segs[segs.length-1], PL=D.pats[last.p];
+      const mids=[]; segs.forEach((sg,k)=>{ const Q=D.pats[sg.p]; for(let pos=sg.fromPos+1;pos<=sg.toPos;pos++){ const s=Q.stops[pos]; if(sg===last&&pos===sg.toPos) continue;
+          if(mids.length&&SNAME[mids[mids.length-1].s]===SNAME[s]) continue; mids.push({s,t:tripTime(Q,sg.day,sg.trip,pos)}); } });
+      const n=mids.length+1, dur=Math.round((last.arr-l.dep)/60);
       const others=nextTrips(P,l.day,l.fromPos,l.dep+60,3).map(fmt).join(', ');
-      if(l.cont){ h=h.replace(/<div class="leg"><div class="t">[^<]*<\/div><div class="bar end"[^>]*><\/div><div class="d"><b>Get off at [^<]*<\/b><\/div><\/div>$/,'');
-        h+=`<div class="leg"><div class="t">${fmt(l.dep)}</div><div class="bar" style="--c:${r[2]}"></div><div class="d"><small>Stay on the ${esc(r[0])} at ${esc(SNAME[P.stops[l.fromPos]])} · ${n} more stop${n>1?'s':''}</small></div></div>`;
-        h+=`<div class="leg"><div class="t">${fmt(l.arr)}</div><div class="bar end" style="--c:${r[2]}"></div><div class="d"><b>Get off at ${esc(SNAME[P.stops[l.toPos]])}</b></div></div>`; return; }
-      h+=`<div class="leg"><div class="t">${fmt(l.dep)}</div><div class="bar" style="--c:${r[2]}"></div><div class="d"><b>${esc(SNAME[P.stops[l.fromPos]])}</b><small>${lineChip(P.route)} ${esc(r[1])} → ${esc(P.head)}</small><small>${l.wait>60?'Wait '+Math.round(l.wait/60)+' min · ':''}Ride ${n} stop${n>1?'s':''}, ${Math.round((l.arr-l.dep)/60)} min${others?' · next buses '+others:''}</small></div></div>`;
-      h+=`<div class="leg"><div class="t">${fmt(l.arr)}</div><div class="bar end" style="--c:${r[2]}"></div><div class="d"><b>Get off at ${esc(SNAME[P.stops[l.toPos]])}</b></div></div>`;
+      const open=state.openLegs&&state.openLegs.has(i);
+      h+=`<div class="leg"><div class="t">${fmt(l.dep)}</div><div class="bar" style="--c:${r[2]}"></div><div class="d"><b>${esc(SNAME[P.stops[l.fromPos]])}</b><small>${lineChip(P.route)} ${esc(r[1])} → ${esc(PL.head)}</small>${l.wait>60?`<small>Wait ${Math.round(l.wait/60)} min${others?' · next buses '+others:''}</small>`:(others?`<small>Next buses ${others}</small>`:'')}
+        <button class="stopsBtn" data-k="${i}">${open?'▾':'▸'} ${n} stop${n>1?'s':''} · ${dur} min</button></div></div>`;
+      if(open) for(const m of mids) h+=`<div class="leg mid"><div class="t">${fmt(m.t)}</div><div class="bar" style="--c:${r[2]}"></div><div class="d">${esc(SNAME[m.s])}</div></div>`;
+      h+=`<div class="leg"><div class="t">${fmt(last.arr)}</div><div class="bar end" style="--c:${r[2]}"></div><div class="d"><b>Get off at ${esc(SNAME[PL.stops[last.toPos]])}</b></div></div>`;
     }
   });
   h+=`<div class="leg"><div class="t">${fmt(it.end)}</div><div class="bar end" style="--c:#c0392b"></div><div class="d"><b>${esc(state.to.label)}</b></div></div></div>`;
