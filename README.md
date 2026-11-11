@@ -4,5 +4,6 @@ Bus trip planner for Curitiba: plans trips on real URBS timetables with transfer
 
 - Bus data: URBS open data via dadosabertos.c3sl.ufpr.br (snapshot 10/11/2026)
 - Streets, places and addresses: © OpenStreetMap contributors (ODbL)
+- Places: Foursquare Open Source Places (Apache License 2.0)
 
 Open `index.html` from GitHub Pages (https) and allow location when the browser asks.
