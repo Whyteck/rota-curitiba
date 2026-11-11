@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.5";
+const APP_VERSION="2026-11-11.6";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -224,13 +224,14 @@ function prevDate(ds){ const [y,m,d]=ds.split('-').map(Number); const t=new Date
 let D=null;              // raw
 let addrIdx, stopGroup, N=0, SX, SY, SLAT, SLON, SNAME, stopPats, foot, searchIdx;
 const LAT0=-25.4296, LON0=-49.2713, KX=111320*Math.cos(LAT0*Math.PI/180), KY=110540;
-const WALK=1.15;         // m/s, including detour factor below
+const WALK=1.25;         // m/s ≈ 4.5 km/h, an average adult pace on city sidewalks
 const DETOUR=1.3;
 const MAX_ACCESS=900;    // m straight-line for origin/destination walk
 const MAX_XFER=350;      // m straight-line between stops for transfers
 const MIN_XFER=60;       // s added to every walking transfer
 
-function walkSec(d){ return Math.round(d*DETOUR/WALK); }
+function walkSec(d){ return Math.round(d*DETOUR/WALK); }            // straight-line fallback before the street graph loads
+function streetSec(m){ return Math.round(m/WALK + Math.min(90, m/250*15)); }   // street distance + ~15 s per 250 m for crossings and lights
 
 async function loadData(){
   const r = await fetch('data.json?v='+APP_VERSION); if(!r.ok) throw new Error('data.json '+r.status);
@@ -397,7 +398,7 @@ async function loadWalk(){
     // grid of edges for snapping
     const G=120, grid=new Map(); const key=(a,b)=>a*100003+b;
     for(let i=0;i<nE;i++){ const seen=new Set(); for(const [x,y] of geo[i]){ const k=key(Math.floor(x/G),Math.floor(y/G)); if(seen.has(k))continue; seen.add(k); let a=grid.get(k); if(!a) grid.set(k,a=[]); a.push(i); } }
-    WG={X,Y,EA,EB,EL,geo,deg,adj,grid,G,key,cache:new Map()}; draw();
+    WG={X,Y,EA,EB,EL,geo,deg,adj,grid,G,key,cache:new Map()}; draw(); setTimeout(refineFootpaths,50);
   }catch(e){ console.warn('walk graph',e); } }
 function snapWalk(x,y){ const {grid,G,key,geo}=WG; let best=null;
   for(let r=0;r<=3&&!best;r++){ const gx=Math.floor(x/G), gy=Math.floor(y/G);
@@ -429,8 +430,37 @@ function walkPath(ax,ay,bx,by){
         const pts=[[ax,ay]].concat(part(A, nodes[0]===sA));
         for(let i=1;i<nodes.length;i++){ const e=pe[nodes[i]]; const P=geo[e]; const seq=EA[e]===nodes[i-1]?P:P.slice().reverse(); for(let k=1;k<seq.length;k++) pts.push(seq[k]); }
         const tail=part(B, bestEnd===tA).reverse(); for(const p of tail) pts.push(p); pts.push([bx,by]); res=pts; } } }
-  if(res){ let L=0; for(let i=1;i<res.length;i++) L+=Math.hypot(res[i][0]-res[i-1][0],res[i][1]-res[i-1][1]); const S=Math.hypot(bx-ax,by-ay); if(L>S*3+400) res=null; else res.len=L; }
+  const S0=Math.hypot(bx-ax,by-ay);
+  if(res){ let L=0; for(let i=1;i<res.length;i++) L+=Math.hypot(res[i][0]-res[i-1][0],res[i][1]-res[i-1][1]); if(L>S0*3+400) res=null; else res.len=L; }
+  // short hop across a (divided) street: people just cross, the map's carriageways have no crossing links
+  if(S0<150 && (!res || res.len>S0*1.2)){ res=[[ax,ay],[bx,by]]; res.len=S0*1.2; }
   WG.cache.set(ck,res); return res; }
+// street distance from a point to many stops at once (bounded Dijkstra), reusing buffers
+let _wd=null, _wt=null;
+const _ss=new Map();
+function stopSnap(s){ let v=_ss.get(s); if(v===undefined){ v=snapWalk(SX[s],SY[s]); if(v&&v.d>250) v=null; _ss.set(s,v); } return v; }
+function streetDists(x,y,maxD){ // -> function(stop) => metres or Infinity
+  const A=snapWalk(x,y); if(!A||A.d>250) return null;
+  const {X,EA,EB,EL,deg,adj}=WG; const n=X.length; if(!_wd){ _wd=new Float64Array(n).fill(Infinity); _wt=[]; }
+  for(const v of _wt) _wd[v]=Infinity; _wt.length=0;
+  const heap=[]; const push=(v,f)=>{ heap.push([f,v]); let i=heap.length-1; while(i){ const p=(i-1)>>1; if(heap[p][0]<=heap[i][0])break; [heap[p],heap[i]]=[heap[i],heap[p]]; i=p; } };
+  const pop=()=>{ const top=heap[0], last=heap.pop(); if(heap.length){ heap[0]=last; let i=0; for(;;){ const l=2*i+1,r=l+1; let m=i; if(l<heap.length&&heap[l][0]<heap[m][0])m=l; if(r<heap.length&&heap[r][0]<heap[m][0])m=r; if(m===i)break; [heap[m],heap[i]]=[heap[i],heap[m]]; i=m; } } return top; };
+  const set=(v,d)=>{ if(d<_wd[v]){ if(_wd[v]===Infinity) _wt.push(v); _wd[v]=d; push(v,d); } };
+  set(EA[A.e],A.d+A.s); set(EB[A.e],A.d+Math.max(0,EL[A.e]-A.s));
+  while(heap.length){ const [dv,v]=pop(); if(dv>_wd[v]) continue; if(dv>maxD) break;
+    for(let k=deg[v];k<deg[v+1];k++){ const e=adj[k]; const w=EA[e]===v?EB[e]:EA[e]; set(w,dv+EL[e]); } }
+  return s=>{ const S=stopSnap(s); const st=Math.hypot(SX[s]-x,SY[s]-y); const cross=st<150? st*1.2 : Infinity; if(!S) return isFinite(cross)?cross:null;   // null: stop not on the street graph
+    if(S.e===A.e) return Math.min(cross, A.d+Math.abs(A.s-S.s)+S.d);
+    return Math.min(cross, Math.min(_wd[EA[S.e]]+S.s, _wd[EB[S.e]]+Math.max(0,EL[S.e]-S.s))+S.d); }; }
+// walking transfers between stops recomputed on the street graph, a few hundred stops at a time
+function refineFootpaths(){ let i=0; const step=()=>{ const t=performance.now();
+    while(i<N && performance.now()-t<12){ const s=i++; const f=streetDists(SX[s],SY[s],MAX_XFER*1.6); if(!f) continue; const out=[];
+      for(const [j] of nearStops(SX[s],SY[s],MAX_XFER)){ if(j===s) continue; let m=f(j); if(m===null){ m=Math.hypot(SX[s]-SX[j],SY[s]-SY[j])*DETOUR; }
+        const st=Math.hypot(SX[s]-SX[j],SY[s]-SY[j]); if(stopGroup[j]===stopGroup[s] && st<200) m=Math.min(m,st*1.2);   // platforms of one terminal/station: walk inside it
+        if(m<=MAX_XFER*1.6) out.push(j, streetSec(m)+MIN_XFER); }
+      foot[s]=out; }
+    if(i<N) setTimeout(step,0); else window.footRefined=performance.now(); };
+  step(); }
 /* ---- background map (OpenStreetMap streets, parks, water) ---- */
 let BM=null;
 async function loadBasemap(){
@@ -751,8 +781,12 @@ function itinSig(it){ return it.legs.filter(l=>l.type==='ride'&&!l.cont).map(l=>
 function plan(laterFrom){
   const q=queryTime(); const arrive=whenMode==='arrive'&&laterFrom==null; let t0=laterFrom!=null?laterFrom:q.sec; const T=arrive?q.sec:null;
   const o=state.from,d=state.to;
-  const os=nearStops(o.x,o.y,MAX_ACCESS).map(([s,dd])=>[s,walkSec(dd)]);
-  const ds=nearStops(d.x,d.y,MAX_ACCESS).map(([s,dd])=>[s,walkSec(dd)]);
+  const access=(p)=>{ const near=nearStops(p.x,p.y,MAX_ACCESS);
+    const f=WG? streetDists(p.x,p.y,MAX_ACCESS*1.5) : null;
+    if(!f) return near.map(([s,dd])=>[s,walkSec(dd)]);
+    const out=[]; for(const [s,dd] of near){ const m=f(s); if(m===null) out.push([s,walkSec(dd)]); else if(m<=MAX_ACCESS*1.5) out.push([s,streetSec(m)]); }   // too far by street: left out
+    return out; };
+  const os=access(o), ds=access(d);
   const day=dayType(q.date).k, pday=dayType(prevDate(q.date)).k;
   const run=(t,banned)=>{ if(!os.length||!ds.length) return []; let r=raptor(os,ds,t,day,5,banned);
     if(t<4*3600) r=r.concat(raptor(os,ds,t+86400,pday,5,banned).map(it=>shiftItin(it,-86400))); return r; };
@@ -784,7 +818,7 @@ function plan(laterFrom){
   const bestEnd=Math.min(...list.map(i=>i.end)); if(!arrive) list=list.filter(i=>i.end<=bestEnd+40*60);
   // at most 2 departures of the same combination of lines
   const perSig=new Map(); list.sort(arrive?((a,b)=>b.start-a.start):((a,b)=>a.end-b.end)); list=list.filter(i=>{ const s=itinSig(i).replace(/@\d+/g,''); const n=perSig.get(s)||0; perSig.set(s,n+1); return n<2; });
-  const wd=directWalk(o.x,o.y,d.x,d.y);
+  const wpath=walkPath(o.x,o.y,d.x,d.y); const wd=wpath&&wpath.len? streetSec(wpath.len) : directWalk(o.x,o.y,d.x,d.y);
   const ws=arrive?T-wd:t0;
   if(wd<45*60 && !(list.length && (arrive? Math.max(...list.map(i=>i.start))>ws+600 : Math.min(...list.map(i=>i.end))<t0+wd-600))) list.push({walkOnly:true,start:ws,end:ws+wd,walk:wd,legs:[{type:'walk',from:'orig',to:'dest',dur:wd,start:ws,end:ws+wd}],rides:0});
   const score=arrive? (it=>-it.start+Math.max(0,it.rides-1)*300+it.walk*0.3) : (it=>it.end+Math.max(0,it.rides-1)*300+it.walk*0.3);
@@ -899,7 +933,7 @@ function openStop(s,all,only,pats){
 $('aboutBtn').onclick=()=>{ const b=$('body'); state.sel=-1; $('panel').classList.remove('collapsed');
   b.innerHTML=`<div class="msg" style="color:var(--ink)"><p><b>Where the times come from.</b> Timetables, stops and routes come from URBS (Urbanização de Curitiba) open data, published daily by UFPR at dadosabertos.c3sl.ufpr.br. This copy is from <b>${esc(D.gen)}</b> and covers ${D.routes.length} lines and ${N.toLocaleString()} stops.</p>
   <p><b>How a route is found.</b> URBS publishes departure times at timing points (terminals and main stops). Times at the stops in between are estimated from the distance along the route. The planner searches every combination of buses with up to 4 transfers, plus short walks between nearby stops (under ${MAX_XFER} m), and lists the fastest trip for each number of transfers.</p>
-  <p><b>Map.</b> Streets, parks and water © OpenStreetMap contributors (ODbL), stored inside the app.</p><p><b>Calendar.</b> Weekday, Saturday and Sunday timetables are chosen automatically. On national and Curitiba holidays, URBS runs the Sunday timetable.</p>
+  <p><b>Map.</b> Streets, parks and water © OpenStreetMap contributors (ODbL), stored inside the app.</p><p><b>Walking.</b> Walks follow the OpenStreetMap streets at about 4.5 km/h, plus a little time for crossings and traffic lights. Nearby stops are chosen by walking distance along streets, not straight-line distance. For short hops under 150 m (crossing an avenue to a tube station, changing platforms) the app assumes you cross directly.</p><p><b>Calendar.</b> Weekday, Saturday and Sunday timetables are chosen automatically. On national and Curitiba holidays, URBS runs the Sunday timetable.</p>
   <p><b>Limits.</b> No live GPS positions. Real buses can run early or late, so leave a few minutes of margin. Addresses are searched offline using OpenStreetMap (about 10,000 Curitiba streets and 300,000 house numbers, © OpenStreetMap contributors) plus URBS stop addresses. When a house number isn't mapped, its position is estimated between the nearest known numbers. Metropolitan lines not run by URBS (Metrocard) aren't included.</p></div>`; draw(); };
 
 /* ================= my location ================= */
