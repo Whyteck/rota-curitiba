@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.6";
+const APP_VERSION="2026-11-11.7";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -191,7 +191,11 @@ function addrSearch(q){
     return {label, sub:(o.st.bairro?o.st.bairro+' · ':'')+(o.num!=null?(g.far?'number not found, showing near nº '+g.near:(g.approx?'position estimated':'exact address')):'street'), x:g.x,y:g.y, kind:'addr', sc:o.num!=null?-3:0.5}; });
   if(!m && qn.length>=3){
     for(const b of addrIdx.bairros) if(ws.every(w=>b.n.includes(w))) res.push({label:b.name,sub:'Neighbourhood',x:b.x,y:b.y,kind:'bairro',sc:b.n.startsWith(qn)?-2.5:0.2});
-    for(const p of addrIdx.pois) if(ws.every(w=>p.n.includes(w))) res.push({label:p.name,sub:p.cat||'Place',x:p.x,y:p.y,kind:'poi',sc:p.n.startsWith(qn)?-1:0.3});
+    const ref=state.me||{x:view.x,y:view.y}; const pr=[];
+    for(const p of addrIdx.pois){ const byName=ws.every(w=>p.n.includes(w)); const byCat=!byName&&ws.every(w=>p.k.includes(w)||p.n.includes(w)); if(!byName&&!byCat) continue;
+      const dist=Math.hypot(p.x-ref.x,p.y-ref.y); pr.push({label:p.name,sub:pcat(p.cat).l+(p.detail?' · '+p.detail:'')+` · ${dist<1000?Math.round(dist/10)*10+' m':(dist/1000).toFixed(1)+' km'} away`,x:p.x,y:p.y,kind:'poi',icon:pcat(p.cat).i,
+        sc:(byName?(p.n.startsWith(qn)?-1:0.1):0.35)+Math.min(dist,20000)/40000}); }
+    pr.sort((a,b)=>a.sc-b.sc); res.push(...pr.slice(0,15));
   }
   return res;
 }
@@ -279,7 +283,7 @@ async function loadData(){
   // offline address index (streets from URBS stop addresses, neighbourhoods, places)
   const A=D.addr||{streets:[],bairros:[],pois:[]};
   addrIdx={ streets:A.streets.map(([name,bairro,flat])=>{ const pts=[]; for(let i=0;i<flat.length;i+=3) pts.push({n:flat[i],x:flat[i+1],y:flat[i+2]}); return {name,bairro,pts,k:normKey(name).split(' '),nums:pts.filter(p=>p.n>=0).sort((a,b)=>a.n-b.n)}; }),
-    bairros:A.bairros.map(([name,x,y])=>({name,x,y,n:norm(name)})), pois:A.pois.map(([name,cat,x,y])=>({name,cat,x,y,n:norm(name)})) };
+    bairros:A.bairros.map(([name,x,y])=>({name,x,y,n:norm(name)})), pois:PL };
   for(const g of searchIdx){ const rs=new Set(); for(const s of g.stops) for(let k=0;k<stopPats[s].length;k+=2) rs.add(D.pats[stopPats[s][k]].route); g.routes=[...rs]; g.term=/^terminal/i.test(g.name); g.tube=/esta[cç][aã]o|tubo/i.test(g.name); g.x=g.stops.reduce((a,s)=>a+SX[s],0)/g.stops.length; g.y=g.stops.reduce((a,s)=>a+SY[s],0)/g.stops.length; }
   buildShapes();
 }
@@ -384,6 +388,55 @@ function w2s(x,y){ return [(x-view.x)*view.s+W/2, -(y-view.y)*view.s+H/2]; }
 function s2w(px,py){ return [(px-W/2)/view.s+view.x, -(py-H/2)/view.s+view.y]; }
 let drawQueued=false; function draw(){ if(!drawQueued){drawQueued=true;requestAnimationFrame(()=>{drawQueued=false;render();});} }
 const state={from:null,to:null,itins:[],sel:-1,picking:null,stopSel:null};
+/* ---- places (OpenStreetMap + URBS) ---- */
+const PCAT={
+  restaurant:{l:'Restaurant',i:'🍽️',k:'restaurante comida almoco jantar food'}, fastfood:{l:'Fast food',i:'🍔',k:'lanchonete lanche hamburguer pizza fast food'},
+  cafe:{l:'Café',i:'☕',k:'cafe cafeteria coffee sorvete ice cream'}, bar:{l:'Bar',i:'🍺',k:'bar boteco pub cerveja balada nightclub'},
+  bakery:{l:'Bakery',i:'🥐',k:'padaria panificadora confeitaria doceria bakery'}, supermarket:{l:'Supermarket',i:'🛒',k:'mercado supermercado mercearia hortifruti acougue grocery'},
+  market:{l:'Market',i:'🧺',k:'feira mercado municipal market'}, mall:{l:'Shopping mall',i:'🛍️',k:'shopping mall loja de departamento'},
+  shop:{l:'Shop',i:'🏬',k:'loja shop store'}, pharmacy:{l:'Pharmacy',i:'💊',k:'farmacia drogaria pharmacy'},
+  hospital:{l:'Hospital',i:'🏥',k:'hospital pronto socorro upa emergencia'}, clinic:{l:'Clinic',i:'🩺',k:'clinica consultorio dentista medico posto de saude ubs clinic'},
+  school:{l:'School',i:'🏫',k:'escola colegio creche school'}, university:{l:'University',i:'🎓',k:'universidade faculdade university college'},
+  bank:{l:'Bank',i:'🏦',k:'banco caixa eletronico atm bank'}, fuel:{l:'Gas station',i:'⛽',k:'posto gasolina combustivel gas'},
+  worship:{l:'Place of worship',i:'⛪',k:'igreja templo paroquia church'}, library:{l:'Library',i:'📚',k:'biblioteca farol do saber library'},
+  culture:{l:'Culture',i:'🎭',k:'teatro cinema centro cultural theatre'}, museum:{l:'Museum',i:'🏛️',k:'museu galeria museum gallery'},
+  sight:{l:'Sight',i:'📸',k:'ponto turistico atracao mirante tourism sight'}, hotel:{l:'Hotel',i:'🏨',k:'hotel pousada hostel'},
+  park:{l:'Park',i:'🌳',k:'parque praca bosque jardim park'}, sport:{l:'Sports',i:'🏟️',k:'estadio ginasio quadra piscina sport'},
+  gym:{l:'Gym',i:'🏋️',k:'academia gym'}, public:{l:'Public service',i:'🏢',k:'prefeitura policia correios rua da cidadania delegacia'},
+  bike:{l:'Bikes',i:'🚲',k:'bicicleta bike'}, pet:{l:'Pets',i:'🐾',k:'pet shop veterinario'}, beauty:{l:'Beauty',i:'💇',k:'salao cabeleireiro beleza barbearia'},
+  car:{l:'Cars',i:'🚗',k:'oficina mecanico carro autopecas'}, place:{l:'Place',i:'📍',k:''}
+};
+const pcat=c=>PCAT[c]||PCAT.place;
+let PL=[], placeGrid=null; const placeHits=[];
+async function loadPlaces(){ try{ const r=await fetch('places.json?v='+APP_VERSION); if(!r.ok) return; const a=await r.json();
+  PL=a.map(([name,cat,x,y,detail])=>{ const c=pcat(cat); return {name,cat,x,y,detail,n:norm(name),k:norm(c.l+' '+c.k+' '+(detail||''))}; });
+  if(addrIdx) addrIdx.pois=PL;
+  placeGrid=new Map(); PL.forEach((p,i)=>{ const k=Math.floor(p.x/300)+','+Math.floor(p.y/300); let g=placeGrid.get(k); if(!g) placeGrid.set(k,g=[]); g.push(i); });
+  draw(); }catch(e){ console.warn('places',e); } }
+function drawPlaces(){
+  placeHits.length=0; if(!placeGrid||view.s<1.0) return;
+  const [x0,y1]=s2w(0,0), [x1,y0]=s2w(W,H); const taken=[]; const hl=selStops();
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(let gx=Math.floor(x0/300);gx<=Math.floor(x1/300);gx++) for(let gy=Math.floor(y0/300);gy<=Math.floor(y1/300);gy++){ const g=placeGrid.get(gx+','+gy); if(!g)continue;
+    for(const i of g){ const p=PL[i]; const [px,py]=w2s(p.x,p.y); if(px<-20||px>W+20||py<-20||py>H+20) continue;
+      if(taken.some(([tx,ty])=>Math.abs(tx-px)<22&&Math.abs(ty-py)<22)) continue; taken.push([px,py]);
+      ctx.globalAlpha=hl?0.35:1;
+      ctx.fillStyle=MS.stopFill; ctx.strokeStyle=MS.stopLine; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(px,py,10,0,7); ctx.fill(); ctx.stroke();
+      ctx.font='12px sans-serif'; ctx.fillStyle=MS.ink; ctx.fillText(pcat(p.cat).i,px,py+1);
+      if(view.s>=1.8){ ctx.font='500 10.5px Inter,sans-serif'; ctx.textAlign='left'; ctx.lineWidth=3; ctx.strokeStyle=MS.halo; ctx.strokeText(p.name.slice(0,28),px+13,py); ctx.fillStyle=MS.stopText; ctx.fillText(p.name.slice(0,28),px+13,py); ctx.textAlign='center'; }
+      placeHits.push({i,px,py}); } }
+  ctx.restore(); }
+function openPlace(i){
+  const p=PL[i], c=pcat(p.cat); state.stopSel=null; state.sel=-1; state.view='list';
+  const near=nearStops(p.x,p.y,600); const groups=[]; for(const [s,d] of near){ const g=stopGroup[s]; if(groups.some(o=>o.g===g))continue; groups.push({g,s,d}); if(groups.length>=4)break; }
+  const b=$('body'); $('panel').classList.remove('collapsed');
+  b.innerHTML=`<div class="stophead"><h3>${c.i} ${esc(p.name)}</h3><div class="next">${esc(c.l)}${p.detail?' · '+esc(p.detail):''}</div>
+    <div class="row"><button class="btn ghost" id="pf">Start here</button><button class="btn ghost" id="pt">Go here</button></div></div>
+    ${groups.length?`<div class="lhint">Nearby stops</div>`+groups.map((o,k)=>`<div class="dep pstop" data-k="${k}" style="cursor:pointer"><span>🚏</span><span class="h">${esc(searchIdx[o.g].name)}<small>${stopRoutes(o.s).slice(0,6).map(ri=>D.routes[ri][0]).join(' · ')}</small></span><span class="in">${Math.round(o.d)} m</span></div>`).join(''):''}`;
+  const pt={x:p.x,y:p.y,label:p.name};
+  $('pf').onclick=()=>setPoint('from',pt); $('pt').onclick=()=>setPoint('to',pt);
+  b.querySelectorAll('.pstop').forEach(el=>el.onclick=()=>openStop(groups[+el.dataset.k].s));
+  draw(); }
 /* ---- walking directions on the OpenStreetMap street graph ---- */
 let WG=null;
 async function loadWalk(){
@@ -556,6 +609,7 @@ function render(){
   ctx.globalAlpha=1; ctx.restore();
   drawLabels();
   drawItin();                 // trip route under the stop boxes
+  drawPlaces();               // places under the stop boxes
   // stops: snapped onto their bus line; small dots at mid zoom, line-number boxes up close
   if(view.s>0.25){ const [x0,y1]=s2w(0,0), [x1,y0]=s2w(W,H); const m=60/view.s;
     const vis=[]; for(let i=0;i<N;i++){ if(SX[i]<x0-m||SX[i]>x1+m||SY[i]<y0-m||SY[i]>y1+m)continue; vis.push(i); }
@@ -730,6 +784,7 @@ function tap(px,py){
   if(view.s>0.9){ for(let k=boxHits.length-1;k>=0;k--){ const b=boxHits[k]; if(px>=b.x0-2&&px<=b.x1+2&&py>=b.y0-2&&py<=b.y1+2){
       if(b.more){ state.expanded=b.s; openStop(b.s); } else { openStop(b.s,false,b.ri,b.e.pats); } return; } } }
   if(state.expanded!=null){ state.expanded=null; }
+  if(view.s>=1.0){ let bi=-1,bd=13*13; for(const ph of placeHits){ const d=(ph.px-px)**2+(ph.py-py)**2; if(d<bd){bd=d;bi=ph.i;} } if(bi>=0){ const cand=nearStops(x,y,40/view.s); let stopNear=false; for(const [s] of cand){ const [sx,sy]=w2s(...markerPos(s)); if((sx-px)**2+(sy-py)**2<bd){ stopNear=true; break; } } if(!stopNear){ openPlace(bi); return; } } }
   const cand=nearStops(x,y,Math.max(14/view.s,0)+50); let best=-1,bd=(view.s>0.9?18:14)**2;
   for(const [s] of cand){ const [mx,my]=markerPos(s); const [sx,sy]=w2s(mx,my); const d=(sx-px)**2+(sy-py)**2; if(d<bd){bd=d;best=s;} }
   if(best>=0){ openStop(best); return; }
@@ -755,7 +810,7 @@ function setupSearch(which){
       sc:(g.n.startsWith(q)?-0.5:0.4)+(g.term?-2.4:0)+(g.tube?-0.6:0)-Math.min(g.routes.length,10)*0.02+(hasNum&&!/\d/.test(g.n)?1:0)}));
     items=addrSearch(raw).concat(stops).sort((a,b)=>a.sc-b.sc).slice(0,25); if('my location minha localizacao'.includes(q)||q.startsWith('my loc')) items.unshift(meItem());
     const ic={stop:'🚏',addr:'📍',bairro:'🏘️',poi:'⭐',me:'🔵'};
-    act=-1; box.innerHTML=items.length?items.map((g,i)=>`<div data-i="${i}">${ic[g.kind]} ${esc(g.label)}<small>${esc(g.sub)}</small></div>`).join(''):'<div style="cursor:default;color:var(--muted)">Nothing found. Check the spelling, or tap Map.</div>';
+    act=-1; box.innerHTML=items.length?items.map((g,i)=>`<div data-i="${i}">${(g.icon||ic[g.kind])} ${esc(g.label)}<small>${esc(g.sub)}</small></div>`).join(''):'<div style="cursor:default;color:var(--muted)">Nothing found. Check the spelling, or tap Map.</div>';
     box.style.display='block'; };
   const choose=i=>{ const g=items[i]; if(!g)return; box.style.display='none'; inp.blur();
     if(g.kind==='me'&&!state.me){ pendingMe=which; startGPS(()=>askManualLocation()); return; } setPoint(which,{x:g.x,y:g.y,label:g.label}); if(!(state.from&&state.to)) fitTo([[g.x,g.y]].concat(state.from?[[state.from.x,state.from.y]]:[]).concat(state.to?[[state.to.x,state.to.y]]:[])); };
@@ -933,7 +988,7 @@ function openStop(s,all,only,pats){
 $('aboutBtn').onclick=()=>{ const b=$('body'); state.sel=-1; $('panel').classList.remove('collapsed');
   b.innerHTML=`<div class="msg" style="color:var(--ink)"><p><b>Where the times come from.</b> Timetables, stops and routes come from URBS (Urbanização de Curitiba) open data, published daily by UFPR at dadosabertos.c3sl.ufpr.br. This copy is from <b>${esc(D.gen)}</b> and covers ${D.routes.length} lines and ${N.toLocaleString()} stops.</p>
   <p><b>How a route is found.</b> URBS publishes departure times at timing points (terminals and main stops). Times at the stops in between are estimated from the distance along the route. The planner searches every combination of buses with up to 4 transfers, plus short walks between nearby stops (under ${MAX_XFER} m), and lists the fastest trip for each number of transfers.</p>
-  <p><b>Map.</b> Streets, parks and water © OpenStreetMap contributors (ODbL), stored inside the app.</p><p><b>Walking.</b> Walks follow the OpenStreetMap streets at about 4.5 km/h, plus a little time for crossings and traffic lights. Nearby stops are chosen by walking distance along streets, not straight-line distance. For short hops under 150 m (crossing an avenue to a tube station, changing platforms) the app assumes you cross directly.</p><p><b>Calendar.</b> Weekday, Saturday and Sunday timetables are chosen automatically. On national and Curitiba holidays, URBS runs the Sunday timetable.</p>
+  <p><b>Map.</b> Streets, parks and water © OpenStreetMap contributors (ODbL), stored inside the app.</p><p><b>Walking.</b> Walks follow the OpenStreetMap streets at about 4.5 km/h, plus a little time for crossings and traffic lights. Nearby stops are chosen by walking distance along streets, not straight-line distance. For short hops under 150 m (crossing an avenue to a tube station, changing platforms) the app assumes you cross directly.</p><p><b>Places.</b> About 10,000 restaurants, cafés, bars, shops, supermarkets, pharmacies, hospitals, schools, hotels, museums and parks from OpenStreetMap and URBS. Search by name or by type (e.g. <i>pizza</i>, <i>farmácia</i>, <i>mercado</i>); nearer places come first. Zoom in to see them on the map.</p><p><b>Calendar.</b> Weekday, Saturday and Sunday timetables are chosen automatically. On national and Curitiba holidays, URBS runs the Sunday timetable.</p>
   <p><b>Limits.</b> No live GPS positions. Real buses can run early or late, so leave a few minutes of margin. Addresses are searched offline using OpenStreetMap (about 10,000 Curitiba streets and 300,000 house numbers, © OpenStreetMap contributors) plus URBS stop addresses. When a house number isn't mapped, its position is estimated between the nearest known numbers. Metropolitan lines not run by URBS (Metrocard) aren't included.</p></div>`; draw(); };
 
 /* ================= my location ================= */
@@ -987,7 +1042,7 @@ setTimeout(checkUpdate,1500); document.addEventListener('visibilitychange',()=>{
 (async()=>{
   try{ await loadData(); }catch(e){ $('loadmsg').textContent='Could not load the bus data ('+e.message+').'; return; }
   $('loading').style.display='none'; initTime(); resize();
-  loadBasemap().then(loadWalk);
+  loadPlaces(); loadBasemap().then(loadWalk);
   startGPS(null);
   if(state.me && !state.from){ state.from={x:state.me.x,y:state.me.y,label:'My location'}; $('fromIn').value='My location'; }
   // initial view: whole network
