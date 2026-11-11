@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.10";
+const APP_VERSION="2026-11-11.11";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -500,7 +500,7 @@ function walkPath(ax,ay,bx,by){
   const S0=Math.hypot(bx-ax,by-ay);
   if(res){ let L=0; for(let i=1;i<res.length;i++) L+=Math.hypot(res[i][0]-res[i-1][0],res[i][1]-res[i-1][1]); if(L>S0*3+400) res=null; else res.len=L; }
   // short hop across a (divided) street: people just cross, the map's carriageways have no crossing links
-  if(S0<150 && (!res || res.len>S0*1.2)){ res=[[ax,ay],[bx,by]]; res.len=S0*1.2; }
+  if(S0<150 && (!res || res.len>S0*2.2+80)){ res=[[ax,ay],[bx,by]]; res.len=S0*1.2; }   // only when the streets force a big detour
   WG.cache.set(ck,res); return res; }
 // street distance from a point to many stops at once (bounded Dijkstra), reusing buffers
 let _wd=null, _wt=null;
@@ -517,8 +517,8 @@ function streetDists(x,y,maxD){ // -> function(stop) => metres or Infinity
   while(heap.length){ const [dv,v]=pop(); if(dv>_wd[v]) continue; if(dv>maxD) break;
     for(let k=deg[v];k<deg[v+1];k++){ const e=adj[k]; const w=EA[e]===v?EB[e]:EA[e]; set(w,dv+EL[e]); } }
   return s=>{ const S=stopSnap(s); const st=Math.hypot(SX[s]-x,SY[s]-y); const cross=st<150? st*1.2 : Infinity; if(!S) return isFinite(cross)?cross:null;   // null: stop not on the street graph
-    if(S.e===A.e) return Math.min(cross, A.d+Math.abs(A.s-S.s)+S.d);
-    return Math.min(cross, Math.min(_wd[EA[S.e]]+S.s, _wd[EB[S.e]]+Math.max(0,EL[S.e]-S.s))+S.d); }; }
+    const net = S.e===A.e ? A.d+Math.abs(A.s-S.s)+S.d : Math.min(_wd[EA[S.e]]+S.s, _wd[EB[S.e]]+Math.max(0,EL[S.e]-S.s))+S.d;
+    return (st<150 && net>st*2.2+80) ? cross : net; }; }
 // walking transfers between stops recomputed on the street graph, a few hundred stops at a time
 function refineFootpaths(){ let i=0; const step=()=>{ const t=performance.now();
     while(i<N && performance.now()-t<12){ const s=i++; const f=streetDists(SX[s],SY[s],MAX_XFER*1.6); if(!f) continue; const out=[];
@@ -736,7 +736,7 @@ function legPoints(l){
   if(l.type==='ride'){ const key=l.p+':'+l.fromPos+':'+l.toPos; if(legCache.has(key)) return legCache.get(key);
     const S=D.pats[l.p].stops; const stopsPts=[]; for(let i=l.fromPos;i<=l.toPos;i++) stopsPts.push(P(S[i]));
     const res=snapToShape(D.pats[l.p].route, stopsPts)||stopsPts; legCache.set(key,res); return res; }
-  const a=l.from==='orig'?[state.from.x,state.from.y]:P(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:P(l.to);
+  const a=l.from==='orig'?[state.from.x,state.from.y]:markerPos(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:markerPos(l.to);
   const w=walkPath(a[0],a[1],b[0],b[1]); return w||[a,b];
 }
 // Follow the route's drawn shape through a sequence of stops. A shape can pass the same street twice (loops,
