@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Rota Curitiba – bus trip planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -151,6 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
+const APP_VERSION="2026-11-11.1";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -230,7 +233,7 @@ const MIN_XFER=60;       // s added to every walking transfer
 function walkSec(d){ return Math.round(d*DETOUR/WALK); }
 
 async function loadData(){
-  const r = await fetch('data.json'); if(!r.ok) throw new Error('data.json '+r.status);
+  const r = await fetch('data.json?v='+APP_VERSION); if(!r.ok) throw new Error('data.json '+r.status);
   D = await r.json();
   const st=D.stops; N=st.n.length;
   SNAME=st.n; SLAT=new Float64Array(N); SLON=new Float64Array(N); SX=new Float32Array(N); SY=new Float32Array(N);
@@ -383,7 +386,7 @@ const state={from:null,to:null,itins:[],sel:-1,picking:null,stopSel:null};
 /* ---- background map (OpenStreetMap streets, parks, water) ---- */
 let BM=null;
 async function loadBasemap(){
-  try{ const r=await fetch('basemap.json'); if(!r.ok) return; const j=await r.json();
+  try{ const r=await fetch('basemap.json?v='+APP_VERSION); if(!r.ok) return; const j=await r.json();
     const layers={}; for(const k in j.layers){ const p=new Path2D(); for(const enc of j.layers[k]){ let x=0,y=0; for(let i=0;i<enc.length;i+=2){ x+=enc[i]; y+=enc[i+1]; if(i===0)p.moveTo(x,-y); else p.lineTo(x,-y);} if(+k>=6) p.closePath(); } layers[k]=p; }
     const labels=j.labels.map(([n,x,y,a,L,c])=>({n,x,y,a,L,c})).sort((a,b)=>a.c-b.c||b.L-a.L);
     BM={layers,labels}; draw();
@@ -665,7 +668,7 @@ let whenMode='now';
 $('when').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; whenMode=b.dataset.v; [...$('when').children].forEach(x=>x.classList.toggle('on',x===b)); const at=whenMode!=='now'; $('atRow').style.display=at?'flex':'none'; updDay(); });
 $('date').onchange=$('time').onchange=()=>updDay();
 function queryTime(){ if(whenMode==='now'){ return nowSP(); } const [h,m]=($('time').value||'00:00').split(':').map(Number); return {date:$('date').value||nowSP().date, sec:h*3600+m*60}; }
-function updDay(){ const q=queryTime(); $('daynote').textContent=dayType(q.date).label+(D?` · data from URBS, ${D.gen}`:''); }
+function updDay(){ const q=queryTime(); $('daynote').textContent=dayType(q.date).label+(D?` · data from URBS, ${D.gen}`:'')+` · v${APP_VERSION}`; }
 $('go').onclick=()=>{ if(!state.from||!state.to){ toast('Set both start and destination'); return;} plan(); };
 
 /* ------- planning ------- */
@@ -863,6 +866,16 @@ function applyTheme(t){ THEME=t; document.documentElement.dataset.theme=t; $('th
   try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',e=>{ let s=null; try{s=localStorage.getItem('rc-theme');}catch(_){} if(!s) applyTheme(e.matches?'dark':'light'); }); }catch(e){}
 })();
 $('themeBtn').onclick=()=>{ const t=THEME==='dark'?'light':'dark'; try{ localStorage.setItem('rc-theme',t); }catch(e){} applyTheme(t); };
+/* ================= self-update ================= */
+// phones often keep an old copy of the page open; check for a newer version on open and whenever the app comes back to the screen
+async function checkUpdate(){
+  try{ const r=await fetch(location.pathname.replace(/\/$/,'/index.html')+'?check='+Date.now(),{cache:'no-store'}); if(!r.ok) return;
+    const m=(await r.text()).match(/APP_VERSION="([^"]+)"/); if(!m||m[1]===APP_VERSION) return;
+    let tried=null; try{ tried=sessionStorage.getItem('rc-upd'); }catch(e){}
+    if(tried===m[1]) return; try{ sessionStorage.setItem('rc-upd',m[1]); }catch(e){}
+    toast('Updating to the latest version…'); setTimeout(()=>{ const u=new URL(location.href); u.searchParams.set('v',m[1]); location.replace(u.toString()); },600);
+  }catch(e){} }
+setTimeout(checkUpdate,1500); document.addEventListener('visibilitychange',()=>{ if(!document.hidden) checkUpdate(); });
 /* ================= boot ================= */
 (async()=>{
   try{ await loadData(); }catch(e){ $('loadmsg').textContent='Could not load the bus data ('+e.message+').'; return; }
