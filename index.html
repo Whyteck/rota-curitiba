@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.9";
+const APP_VERSION="2026-11-11.10";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -305,15 +305,15 @@ function raptor(orig, dest, t0, day, maxRides=5, banned=null){
   // orig/dest: [[stop, walkSec]]
   const destW=new Map(); for(const [s,w] of dest) if(!destW.has(s)||destW.get(s)>w) destW.set(s,w);
   const best=new Int32Array(N).fill(INF);
-  let prev=new Int32Array(N).fill(INF); const par0=new Map();
+  let prev=new Int32Array(N).fill(INF); const par0=new Map(); let lw=new Int32Array(N);   // lw: walking time of the last leg into each stop
   let marked=new Set();
-  for(const [s,w] of orig){ const t=t0+w; if(t<prev[s]){prev[s]=t;best[s]=t;par0.set(s,{k:'start',w});marked.add(s);} }
+  for(const [s,w] of orig){ const t=t0+w; if(t<prev[s]){prev[s]=t;best[s]=t;lw[s]=w;par0.set(s,{k:'start',w});marked.add(s);} }
   const rounds=[{arr:prev,par:par0}];
   let bestDest=INF;
   const evalDest=arr=>{ let b=INF,bs=-1; for(const [s,w] of destW){ if(arr[s]<INF && arr[s]+w<b){b=arr[s]+w;bs=s;} } return [b,bs]; };
   const results=[];
   for(let k=1;k<=maxRides && marked.size;k++){
-    const arr=Int32Array.from(prev); const par=new Map();
+    const arr=Int32Array.from(prev); const par=new Map(); const lwN=Int32Array.from(lw);
     const Q=new Map();
     for(const s of marked){ const sp=stopPats[s]; for(let i=0;i<sp.length;i+=2){ const p=sp[i],pos=sp[i+1]; const q=Q.get(p); if(q===undefined||pos<q) Q.set(p,pos); } }
     const newly=new Set();
@@ -322,17 +322,18 @@ function raptor(orig, dest, t0, day, maxRides=5, banned=null){
       let trip=-1, bpos=-1; const S=P.stops;
       for(let pos=pos0;pos<S.length;pos++){
         const s=S[pos];
-        if(trip>=0){ const t=tripTime(P,day,trip,pos); if(t<best[s] && t<bestDest){ arr[s]=t; best[s]=t; par.set(s,{k:'ride',p,trip,from:bpos,to:pos}); newly.add(s);} }
+        if(trip>=0){ const t=tripTime(P,day,trip,pos); if(t<best[s] && t<bestDest){ arr[s]=t; best[s]=t; lwN[s]=0; par.set(s,{k:'ride',p,trip,from:bpos,to:pos}); newly.add(s);} }
         if(pos<S.length-1 && prev[s]<INF && (trip<0 || prev[s]<=tripTime(P,day,trip,pos))){
           const nt=earliestTrip(P,day,pos,prev[s]);
           if(nt>=0 && (trip<0 || tripTime(P,day,nt,pos)<tripTime(P,day,trip,pos))){ trip=nt; bpos=pos; }
+          else if(trip>=0 && nt===trip && lw[s]<lw[S[bpos]]){ bpos=pos; }   // same bus, less walking to reach this stop: board here instead
         }
       }
     }
     // walking transfers from stops reached by ride
     marked=new Set(newly);
-    for(const s of newly){ const f=foot[s]; for(let i=0;i<f.length;i+=2){ const s2=f[i], t=arr[s]+f[i+1]; if(t<arr[s2] && t<best[s2] && t<bestDest){ arr[s2]=t; best[s2]=t; par.set(s2,{k:'walk',from:s,w:f[i+1]}); marked.add(s2);} } }
-    rounds.push({arr,par}); prev=arr;
+    for(const s of newly){ const f=foot[s]; for(let i=0;i<f.length;i+=2){ const s2=f[i], t=arr[s]+f[i+1]; if(t<arr[s2] && t<best[s2] && t<bestDest){ arr[s2]=t; best[s2]=t; lwN[s2]=f[i+1]; par.set(s2,{k:'walk',from:s,w:f[i+1]}); marked.add(s2);} } }
+    rounds.push({arr,par}); prev=arr; lw=lwN;
     const [b,bs]=evalDest(arr);
     if(b<bestDest){ bestDest=b; results.push({k,arr:b,stop:bs}); }
   }
