@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.4";
+const APP_VERSION="2026-11-11.5";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -383,6 +383,54 @@ function w2s(x,y){ return [(x-view.x)*view.s+W/2, -(y-view.y)*view.s+H/2]; }
 function s2w(px,py){ return [(px-W/2)/view.s+view.x, -(py-H/2)/view.s+view.y]; }
 let drawQueued=false; function draw(){ if(!drawQueued){drawQueued=true;requestAnimationFrame(()=>{drawQueued=false;render();});} }
 const state={from:null,to:null,itins:[],sel:-1,picking:null,stopSel:null};
+/* ---- walking directions on the OpenStreetMap street graph ---- */
+let WG=null;
+async function loadWalk(){
+  try{ const r=await fetch('walk.json?v='+APP_VERSION); if(!r.ok) return; const j=await r.json();
+    const nN=j.n.length/2, X=new Float32Array(nN), Y=new Float32Array(nN); for(let i=0;i<nN;i++){ X[i]=j.n[2*i]; Y[i]=j.n[2*i+1]; }
+    const nE=j.e.length/3, EA=new Int32Array(nE), EB=new Int32Array(nE), EL=new Float32Array(nE); for(let i=0;i<nE;i++){ EA[i]=j.e[3*i]; EB[i]=j.e[3*i+1]; EL[i]=j.e[3*i+2]; }
+    // full geometry of each edge (a ... b) for snapping and drawing
+    const geo=new Array(nE); for(let i=0;i<nE;i++){ const g=j.g[i]; const pts=[[X[EA[i]],Y[EA[i]]]]; let x=X[EA[i]], y=Y[EA[i]]; for(let k=0;k<g.length;k+=2){ x+=g[k]; y+=g[k+1]; pts.push([x,y]); } pts.push([X[EB[i]],Y[EB[i]]]); geo[i]=pts; }
+    // adjacency (CSR)
+    const deg=new Int32Array(nN+1); for(let i=0;i<nE;i++){ deg[EA[i]+1]++; deg[EB[i]+1]++; } for(let i=0;i<nN;i++) deg[i+1]+=deg[i];
+    const adj=new Int32Array(2*nE), fill=deg.slice(0,nN); for(let i=0;i<nE;i++){ adj[fill[EA[i]]++]=i; adj[fill[EB[i]]++]=i; }
+    // grid of edges for snapping
+    const G=120, grid=new Map(); const key=(a,b)=>a*100003+b;
+    for(let i=0;i<nE;i++){ const seen=new Set(); for(const [x,y] of geo[i]){ const k=key(Math.floor(x/G),Math.floor(y/G)); if(seen.has(k))continue; seen.add(k); let a=grid.get(k); if(!a) grid.set(k,a=[]); a.push(i); } }
+    WG={X,Y,EA,EB,EL,geo,deg,adj,grid,G,key,cache:new Map()}; draw();
+  }catch(e){ console.warn('walk graph',e); } }
+function snapWalk(x,y){ const {grid,G,key,geo}=WG; let best=null;
+  for(let r=0;r<=3&&!best;r++){ const gx=Math.floor(x/G), gy=Math.floor(y/G);
+    for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++){ if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue; const a=grid.get(key(gx+dx,gy+dy)); if(!a)continue;
+      for(const e of a){ const P=geo[e]; let along=0;
+        for(let k=0;k<P.length-1;k++){ const [ax,ay]=P[k],[bx,by]=P[k+1]; const vx=bx-ax,vy=by-ay,L=Math.hypot(vx,vy)||1e-9; let t=((x-ax)*vx+(y-ay)*vy)/(L*L); t=t<0?0:t>1?1:t; const px=ax+t*vx,py=ay+t*vy,d=Math.hypot(px-x,py-y);
+          if(!best||d<best.d) best={e,k,t,px,py,d,s:along+t*L}; along+=L; } } } }
+  return best; }
+function walkPath(ax,ay,bx,by){
+  if(!WG) return null; const ck=Math.round(ax)+','+Math.round(ay)+'>'+Math.round(bx)+','+Math.round(by); if(WG.cache.has(ck)) return WG.cache.get(ck);
+  const A=snapWalk(ax,ay), B=snapWalk(bx,by); let res=null;
+  if(A&&B&&A.d<250&&B.d<250){ const {X,Y,EA,EB,EL,geo,deg,adj}=WG;
+    const part=(S,toStart)=>{ const P=geo[S.e]; return toStart? P.slice(0,S.k+1).concat([[S.px,S.py]]).reverse() : [[S.px,S.py]].concat(P.slice(S.k+1)); };   // from the snap point to node a / node b
+    if(A.e===B.e){ const P=geo[A.e]; const pts=[[ax,ay],[A.px,A.py]]; if(A.s<=B.s){ for(let k=A.k+1;k<=B.k;k++) pts.push(P[k]); } else { for(let k=A.k;k>B.k;k--) pts.push(P[k]); } pts.push([B.px,B.py],[bx,by]); res=pts; }
+    else {
+      // A*: start from both ends of A's edge, finish at either end of B's edge
+      const n=X.length, dist=new Float64Array(n).fill(Infinity), prev=new Int32Array(n).fill(-1), pe=new Int32Array(n).fill(-1);
+      const heap=[]; const push=(v,f)=>{ heap.push([f,v]); let i=heap.length-1; while(i){ const p=(i-1)>>1; if(heap[p][0]<=heap[i][0])break; [heap[p],heap[i]]=[heap[i],heap[p]]; i=p; } };
+      const pop=()=>{ const top=heap[0], last=heap.pop(); if(heap.length){ heap[0]=last; let i=0; for(;;){ const l=2*i+1,r=l+1; let m=i; if(l<heap.length&&heap[l][0]<heap[m][0])m=l; if(r<heap.length&&heap[r][0]<heap[m][0])m=r; if(m===i)break; [heap[m],heap[i]]=[heap[i],heap[m]]; i=m; } } return top; };
+      const hx=B.px, hy=B.py, hfun=v=>Math.hypot(X[v]-hx,Y[v]-hy);
+      const LA=EL[A.e], LB=EL[B.e];
+      const sA=EA[A.e], sB=EB[A.e]; dist[sA]=A.s; dist[sB]=Math.max(0,LA-A.s); push(sA,dist[sA]+hfun(sA)); push(sB,dist[sB]+hfun(sB));
+      const tA=EA[B.e], tB=EB[B.e]; const tailA=B.s, tailB=Math.max(0,LB-B.s);
+      let bestT=Infinity, bestEnd=-1, it=0;
+      while(heap.length && it++<200000){ const [f,v]=pop(); if(f>=bestT) break; const dv=dist[v]; if(f>dv+hfun(v)+1e-6) continue;
+        if(v===tA && dv+tailA<bestT){ bestT=dv+tailA; bestEnd=v; } if(v===tB && dv+tailB<bestT){ bestT=dv+tailB; bestEnd=v; }
+        for(let k=deg[v];k<deg[v+1];k++){ const e=adj[k]; const w=EA[e]===v?EB[e]:EA[e]; const nd=dv+EL[e]; if(nd<dist[w]){ dist[w]=nd; prev[w]=v; pe[w]=e; push(w,nd+hfun(w)); } } }
+      if(bestEnd>=0){ const nodes=[]; for(let v=bestEnd; v>=0; v=prev[v]) { nodes.push(v); if(v===sA||v===sB) break; } nodes.reverse();
+        const pts=[[ax,ay]].concat(part(A, nodes[0]===sA));
+        for(let i=1;i<nodes.length;i++){ const e=pe[nodes[i]]; const P=geo[e]; const seq=EA[e]===nodes[i-1]?P:P.slice().reverse(); for(let k=1;k<seq.length;k++) pts.push(seq[k]); }
+        const tail=part(B, bestEnd===tA).reverse(); for(const p of tail) pts.push(p); pts.push([bx,by]); res=pts; } } }
+  if(res){ let L=0; for(let i=1;i<res.length;i++) L+=Math.hypot(res[i][0]-res[i-1][0],res[i][1]-res[i-1][1]); const S=Math.hypot(bx-ax,by-ay); if(L>S*3+400) res=null; else res.len=L; }
+  WG.cache.set(ck,res); return res; }
 /* ---- background map (OpenStreetMap streets, parks, water) ---- */
 let BM=null;
 async function loadBasemap(){
@@ -590,7 +638,8 @@ function legPoints(l){
   if(l.type==='ride'){ const key=l.p+':'+l.fromPos+':'+l.toPos; if(legCache.has(key)) return legCache.get(key);
     const S=D.pats[l.p].stops; const stopsPts=[]; for(let i=l.fromPos;i<=l.toPos;i++) stopsPts.push(P(S[i]));
     const res=snapToShape(D.pats[l.p].route, stopsPts)||stopsPts; legCache.set(key,res); return res; }
-  const a=l.from==='orig'?[state.from.x,state.from.y]:P(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:P(l.to); return [a,b];
+  const a=l.from==='orig'?[state.from.x,state.from.y]:P(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:P(l.to);
+  const w=walkPath(a[0],a[1],b[0],b[1]); return w||[a,b];
 }
 // Follow the route's drawn shape through a sequence of stops. A shape can pass the same street twice (loops,
 // out-and-back sections), so every stop gets all its nearby passes as candidates and a small dynamic programme
@@ -787,7 +836,7 @@ function legsHTML(it){
       if(l.from==='orig' && l.dur<45) return;
       const to=l.to==='dest'? state.to.label : SNAME[l.to];
       const from=l.from==='orig'? state.from.label : SNAME[l.from];
-      const same=from===to; const m=Math.round(l.dur*WALK/DETOUR/10)*10;
+      const same=from===to; const wp=legPoints(l); const m=Math.round(((wp&&wp.len)||l.dur*WALK/DETOUR)/10)*10;
       h+=`<div class="leg"><div class="t">${fmt(l.start)}</div><div class="bar walk" style="--c:var(--walk)"></div><div class="d"><b>${l.from==='orig'?esc(from):(same?'Change platform':'Walk')}</b><small>🚶 ${same?'Inside '+esc(to)+', ':'Walk '}${Math.max(1,Math.round(l.dur/60))} min${m>=20&&!same?` (~${m} m) to ${esc(to)}`:''}</small></div></div>`;
     } else {
       if(l.cont) return;                                   // merged into the ride it continues
@@ -865,7 +914,7 @@ function startGPS(onFail){
       try{ if(geoWatch==null) geoWatch=navigator.geolocation.watchPosition(gotFix,()=>{}, {enableHighAccuracy:true,maximumAge:10000}); }catch(e){} },
     ()=>{ onFail&&onFail(); }, {enableHighAccuracy:true,timeout:8000,maximumAge:60000}); }catch(e){ onFail&&onFail(); }
 }
-function gotFix(p){ const [x,y]=llToXY(p.coords.latitude,p.coords.longitude); state.me={x,y,acc:p.coords.accuracy,src:'gps'}; for(const w of ['from','to']) if(state[w]&&state[w].label==='My location'){ state[w].x=x; state[w].y=y; } afterMe(); draw(); }
+function gotFix(p){ const [x,y]=llToXY(p.coords.latitude,p.coords.longitude); state.me={x,y,acc:p.coords.accuracy,src:'gps'}; if(!state.from && D){ state.from={x,y,label:'My location'}; $('fromIn').value='My location'; } for(const w of ['from','to']) if(state[w]&&state[w].label==='My location'){ state[w].x=x; state[w].y=y; } afterMe(); draw(); }
 function afterMe(){ if(pendingMe){ const w=pendingMe; pendingMe=null; setPoint(w,{x:state.me.x,y:state.me.y,label:'My location'}); } }
 function askManualLocation(){ setPicking('me'); toast('Location isn’t available here. Tap the map where you are.',3500); }
 function locate(){
@@ -875,7 +924,7 @@ function locate(){
     if(state.me.src==='manual') toast('Tap ◎ again to move your location'); return; }
   toast('Finding your location…'); startGPS(()=>askManualLocation());
 }
-function setMeManual(x,y){ state.me={x,y,src:'manual'}; try{ localStorage.setItem('rc-me',JSON.stringify({x,y})); }catch(e){} toast('Location saved on this device'); afterMe(); draw(); }
+function setMeManual(x,y){ state.me={x,y,src:'manual'}; if(!state.from){ state.from={x,y,label:'My location'}; $('fromIn').value='My location'; } try{ localStorage.setItem('rc-me',JSON.stringify({x,y})); }catch(e){} toast('Location saved on this device'); afterMe(); draw(); }
 function drawMe(){ const m=state.me; if(!m) return; const [px,py]=w2s(m.x,m.y);
   if(m.acc&&m.acc*view.s>9){ ctx.fillStyle='rgba(26,115,232,.15)'; ctx.strokeStyle='rgba(26,115,232,.35)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(px,py,m.acc*view.s,0,7); ctx.fill(); ctx.stroke(); }
   ctx.fillStyle='rgba(26,115,232,.22)'; ctx.beginPath(); ctx.arc(px,py,14,0,7); ctx.fill();
@@ -904,7 +953,7 @@ setTimeout(checkUpdate,1500); document.addEventListener('visibilitychange',()=>{
 (async()=>{
   try{ await loadData(); }catch(e){ $('loadmsg').textContent='Could not load the bus data ('+e.message+').'; return; }
   $('loading').style.display='none'; initTime(); resize();
-  loadBasemap();
+  loadBasemap().then(loadWalk);
   startGPS(null);
   if(state.me && !state.from){ state.from={x:state.me.x,y:state.me.y,label:'My location'}; $('fromIn').value='My location'; }
   // initial view: whole network
