@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.3";
+const APP_VERSION="2026-11-11.4";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -482,7 +482,7 @@ function render(){
   if(view.s>0.25){ const [x0,y1]=s2w(0,0), [x1,y0]=s2w(W,H); const m=60/view.s;
     const vis=[]; for(let i=0;i<N;i++){ if(SX[i]<x0-m||SX[i]>x1+m||SY[i]<y0-m||SY[i]>y1+m)continue; vis.push(i); }
     if(view.s<=0.9){ const rr=view.s>0.6?3.5:2.3; ctx.lineWidth=1;
-      const hlS=selStops(); for(const i of vis){ if(hlS&&!hlS.has(i))continue; const [wx,wy]=markerPos(i); const [px,py]=w2s(wx,wy); const rs=stopRoutes(i); ctx.fillStyle=MS.stopFill; ctx.strokeStyle=rs.length?routeColor(rs[0]):MS.stopLine; ctx.beginPath(); ctx.arc(px,py,rr,0,7); ctx.fill(); ctx.stroke(); } }
+      const hlS=selStops(); for(const i of vis){ ctx.globalAlpha=(hlS&&!hlS.has(i))?FADE:1; const [wx,wy]=markerPos(i); const [px,py]=w2s(wx,wy); const rs=stopRoutes(i); ctx.fillStyle=MS.stopFill; ctx.strokeStyle=rs.length?routeColor(rs[0]):MS.stopLine; ctx.beginPath(); ctx.arc(px,py,rr,0,7); ctx.fill(); ctx.stroke(); } ctx.globalAlpha=1; }
     else {
       ctx.lineJoin='round'; const boxes=[]; const doneGroup=new Set();
       const hit=bx=>boxes.some(o=>bx[0]<o[2]&&bx[2]>o[0]&&bx[1]<o[3]&&bx[3]>o[1]);
@@ -497,7 +497,7 @@ function render(){
         if(more){ const w=ws[ws.length-1]; ctx.fillStyle=MS.stopFill; rr_(x,y,w,bh,4); ctx.fill(); ctx.strokeStyle=MS.stopLine; ctx.lineWidth=1; ctx.stroke(); ctx.fillStyle=MS.ink; ctx.fillText('+'+more,x+4,y+bh/2+0.5); boxHits.push({x0:x-3,y0:y-3,x1:x+w+3,y1:y+bh+3,s:i,more:true}); } };
       const hlStops=selStops();
       for(const i of order){ if(i===exp)continue; const rs=stopEntries(i); if(!rs.length)continue; const [wx,wy]=markerPos(i); const [px,py]=w2s(wx,wy);
-        ctx.globalAlpha=(hlStops&&!hlStops.has(i))?0.25:1;
+        ctx.globalAlpha=(hlStops&&!hlStops.has(i))?FADE:1;
         const show=rs.slice(0,rs.length>4?3:4); const more=rs.length-show.length;
         const ws=show.map(e=>ctx.measureText(D.routes[e.ri][0]).width+18); if(more) ws.push(ctx.measureText('+'+more).width+8);
         const tot=ws.reduce((a,b)=>a+b,0)+2*(ws.length-1); let x=px-tot/2; const bh=16, y=py-bh/2;
@@ -517,11 +517,13 @@ function render(){
       ctx.textBaseline='alphabetic';
       // terminal / station names, placed in a free spot around the centre
       for(const g of searchIdx){ if(g.stops.length<2||!(g.term||g.tube))continue; const [px,py]=w2s(g.x,g.y); if(px<-200||px>W+50||py<-30||py>H+30)continue;
+        ctx.globalAlpha=(hlStops&&!g.stops.some(s=>hlStops.has(s)))?FADE:1;
         ctx.font='700 13px Inter,sans-serif'; const w=ctx.measureText(g.name).width; for(const dy of [5,-22,30,-46,54]){ if(put(g.name,px-w/2,py+dy,'700 13px Inter,sans-serif',MS.ink)) break; } }
+      ctx.globalAlpha=1;
       // names: terminals/stations once at the centre, street stops once per stop pair, placed under the boxes
       for(const i of vis){ const gi=stopGroup[i], g=searchIdx[gi]; if(g.stops.length>1&&(g.term||g.tube))continue; if(doneGroup.has(gi))continue;
-        const [wx,wy]=markerPos(i); const [px,py]=w2s(wx,wy); const t=stopLabel(SNAME[i]); ctx.font='500 11px Inter,sans-serif'; const w=ctx.measureText(t).width;
-        if(put(t,px-w/2,py+21,'500 11px Inter,sans-serif',MS.stopText)) doneGroup.add(gi); } }
+        const [wx,wy]=markerPos(i); const [px,py]=w2s(wx,wy); const t=stopLabel(SNAME[i]); ctx.font='500 11px Inter,sans-serif'; const w=ctx.measureText(t).width; ctx.globalAlpha=(hlStops&&!hlStops.has(i))?FADE:1;
+        if(put(t,px-w/2,py+21,'500 11px Inter,sans-serif',MS.stopText)) doneGroup.add(gi); } ctx.globalAlpha=1; }
   }
   // terminals labels
   if(view.s>0.045 && view.s<=0.9 && searchIdx){ ctx.font='600 11px Inter,sans-serif'; for(const g of searchIdx){ if(!g.term)continue; const [px,py]=w2s(g.x,g.y); if(px<-50||px>W+50||py<-20||py>H+20)continue; ctx.fillStyle=MS.stopFill; ctx.strokeStyle=MS.ink; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(px,py,4.5,0,7); ctx.fill(); ctx.stroke(); if(view.s>0.08){ ctx.lineWidth=3; ctx.strokeStyle=MS.halo; ctx.strokeText(g.name.replace(/^Terminal\s*/i,'T. '),px+7,py+4); ctx.fillStyle=MS.ink; ctx.fillText(g.name.replace(/^Terminal\s*/i,'T. '),px+7,py+4);} } }
@@ -534,7 +536,10 @@ function render(){
 }
 function rr_(x,y,w,hh,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+hh,r); ctx.arcTo(x+w,y+hh,x,y+hh,r); ctx.arcTo(x,y+hh,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 const boxHits=[]; const _pp=new Map(); const _pl=new Map();
-function selStops(){ const S=state.stopSel; if(!S||!S.routes)return null; const set=new Set();
+const FADE=0.14;   // same faintness as the non-highlighted lines
+function selStops(){ const S=state.stopSel;
+  if((!S||!S.routes) && state.sel>=0 && state.itins[state.sel]){ const set=new Set(); for(const l of state.itins[state.sel].legs){ if(l.type!=='ride')continue; const st=D.pats[l.p].stops; for(let p=l.fromPos;p<=l.toPos;p++) set.add(st[p]); } return set; }
+  if(!S||!S.routes)return null; const set=new Set();
   if(S.pats){ for(const pi of S.pats) for(const s of D.pats[pi].stops) set.add(s); }
   else { D.pats.forEach(P=>{ if(S.routes.has(P.route)) for(const s of P.stops) set.add(s); }); }
   return set; }
