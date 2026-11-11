@@ -153,7 +153,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.1";
+const APP_VERSION="2026-11-11.2";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -585,20 +585,37 @@ function legPoints(l){
     const res=snapToShape(D.pats[l.p].route, stopsPts)||stopsPts; legCache.set(key,res); return res; }
   const a=l.from==='orig'?[state.from.x,state.from.y]:P(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:P(l.to); return [a,b];
 }
+// Follow the route's drawn shape through a sequence of stops. A shape can pass the same street twice (loops,
+// out-and-back sections), so every stop gets all its nearby passes as candidates and a small dynamic programme
+// picks, in order along the shape, the combination with the least distance travelled.
+function shapeCum(sh){ if(sh.cum) return sh.cum; const c=new Float64Array(sh.length); for(let i=1;i<sh.length;i++) c[i]=c[i-1]+Math.hypot(sh[i][0]-sh[i-1][0],sh[i][1]-sh[i-1][1]); sh.cum=c; return c; }
+function passes(sh,x,y,maxD){ // best projection in each run of nearby segments
+  const out=[]; let cur=null;
+  for(let i=0;i<sh.length-1;i++){ const [ax,ay]=sh[i],[bx,by]=sh[i+1];
+    if(Math.min(ax,bx)>x+maxD||Math.max(ax,bx)<x-maxD||Math.min(ay,by)>y+maxD||Math.max(ay,by)<y-maxD){ if(cur){out.push(cur);cur=null;} continue; }
+    const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy||1; let t=((x-ax)*dx+(y-ay)*dy)/L; t=t<0?0:t>1?1:t; const px=ax+t*dx,py=ay+t*dy, d=Math.hypot(px-x,py-y);
+    if(d<=maxD){ const c={i,t,px,py,d}; if(!cur||d<cur.d) cur=c; } else if(cur){ out.push(cur); cur=null; } }
+  if(cur) out.push(cur); return out; }
 function snapToShape(ri, pts){
-  // follow the route's drawn shape: project each stop, in order, onto the shape's segments
-  const shapes=routeShapes.get(ri); if(!shapes) return null; let best=null, bestErr=1e18, bestShape=null;
-  for(const sh of shapes){ let idx=0, err=0, ok=true; const proj=[];
-    for(const [x,y] of pts){ let bi=-1,bd=1e18,bp=null;
-      for(let i=idx;i<sh.length-1;i++){ const [ax,ay]=sh[i],[bx,by]=sh[i+1]; const dx=bx-ax,dy=by-ay; const L=dx*dx+dy*dy||1; let t=((x-ax)*dx+(y-ay)*dy)/L; t=t<0?0:t>1?1:t; const px=ax+t*dx,py=ay+t*dy; const d=(px-x)**2+(py-y)**2;
-        if(d<bd){bd=d;bi=i;bp=[px,py];} if(bd<400 && i>bi+40) break; }
-      if(bi<0||bd>90*90){ok=false;break;} proj.push([bi,bp]); idx=bi; err+=bd; }
-    if(ok && err<bestErr){ bestErr=err; best=proj; bestShape=sh; } }
+  const shapes=routeShapes.get(ri); if(!shapes) return null; let best=null;
+  for(const sh of shapes){ const cum=shapeCum(sh);
+    const C=pts.map(([x,y])=>passes(sh,x,y,80).map(c=>({...c,s:cum[c.i]+c.t*Math.hypot(sh[c.i+1][0]-sh[c.i][0],sh[c.i+1][1]-sh[c.i][1])})));
+    if(C.filter(c=>!c.length).length>Math.max(1,pts.length*0.15)) continue;          // this shape doesn't serve these stops
+    // DP: cost = distance travelled along the shape + 4 × distance from stop to its projection
+    let prev=null;
+    for(let k=0;k<C.length;k++){ const cand=C[k];
+      if(!cand.length) continue;                                     // stop off the shape (e.g. inside a terminal): skip it
+      const cur=cand.map(c=>{ if(!prev) return {...c,cost:4*c.d,from:null};
+        let bc=Infinity,bf=null; for(const p of prev){ if(p.c.s>c.s+1) continue; const v=p.cost+(c.s-p.c.s)+4*c.d; if(v<bc){bc=v;bf=p.c;} }
+        return {...c,cost:bc,from:bf}; });
+      C[k]=cur; prev=cur.filter(c=>isFinite(c.cost)).map(c=>({c,cost:c.cost})); if(!prev.length) break; }
+    if(!prev||!prev.length) continue;
+    const end=prev.reduce((a,b)=>b.cost<a.cost?b:a); if(!best||end.cost<best.cost) best={cost:end.cost,end:end.c,sh}; }
   if(!best) return null;
-  const out=[];
-  for(let k=0;k<best.length;k++){ out.push(best[k][1]); if(k<best.length-1) for(let i=best[k][0]+1;i<=best[k+1][0];i++) out.push(sh_(i)); }
+  const chain=[]; for(let c=best.end;c;c=c.from) chain.push(c); chain.reverse(); const sh=best.sh;
+  const out=[[chain[0].px,chain[0].py]];
+  for(let k=1;k<chain.length;k++){ const a=chain[k-1], b=chain[k]; for(let i=a.i+1;i<=b.i;i++) out.push(sh[i]); out.push([b.px,b.py]); }
   return out;
-  function sh_(i){ return bestShape[i]; }
 }
 function fitTo(pts){ if(!pts.length)return; let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9; for(const [x,y] of pts){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}
   const wide=innerWidth>=760; const padL=wide?400:20, padB=wide?20:Math.min(innerHeight*0.62,460), padT=40, padR=60;
