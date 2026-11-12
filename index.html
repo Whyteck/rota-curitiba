@@ -68,6 +68,10 @@ button,input,select{font:inherit;color:inherit}
 .opt.nohover{cursor:default}
 .opt:not(.nohover):hover{border-color:var(--accent)}
 .lhint{font-size:12px;color:var(--muted);padding:6px 14px 0}
+.prefs{display:flex;gap:6px;overflow-x:auto;padding:8px 10px 2px;scrollbar-width:none}
+.prefs::-webkit-scrollbar{display:none}
+.pchip{flex:none;border:1px solid var(--line);background:var(--field);color:var(--ink);border-radius:16px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer}
+.pchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .dtop{padding:6px 10px 0}
 .cg{display:inline-flex;align-items:center;gap:2px}
 .chips{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px}
@@ -153,7 +157,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.12";
+const APP_VERSION="2026-11-11.14";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -332,7 +336,7 @@ function raptor(orig, dest, t0, day, maxRides=5, banned=null){
     }
     // walking transfers from stops reached by ride
     marked=new Set(newly);
-    for(const s of newly){ const f=foot[s]; for(let i=0;i<f.length;i+=2){ const s2=f[i], t=arr[s]+f[i+1]; if(t<arr[s2] && t<best[s2] && t<bestDest){ arr[s2]=t; best[s2]=t; lwN[s2]=f[i+1]; par.set(s2,{k:'walk',from:s,w:f[i+1]}); marked.add(s2);} } }
+    for(const s of newly){ const f=foot[s]; for(let i=0;i<f.length;i+=2){ const s2=f[i]; if(newly.has(s2)) continue; const t=arr[s]+f[i+1]; if(t<arr[s2] && t<best[s2] && t<bestDest){ arr[s2]=t; best[s2]=t; lwN[s2]=f[i+1]; par.set(s2,{k:'walk',from:s,w:f[i+1]}); marked.add(s2);} } }
     rounds.push({arr,par}); prev=arr; lw=lwN;
     const [b,bs]=evalDest(arr);
     if(b<bestDest){ bestDest=b; results.push({k,arr:b,stop:bs}); }
@@ -350,6 +354,10 @@ function buildItin(rounds,k,s,wDest,t0,day){
     if(pr.k==='ride'){ const P=D.pats[pr.p]; legs.push({type:'ride',p:pr.p,trip:pr.trip,fromPos:pr.from,toPos:pr.to,dep:tripTime(P,day,pr.trip,pr.from),arr:tripTime(P,day,pr.trip,pr.to),day}); cur=P.stops[pr.from]; k--; continue; }
   }
   legs.reverse();
+  // two walks in a row (walk to a stop, then walk on): show as one walk
+  for(let i=legs.length-1;i>0;i--){ const a=legs[i-1], b=legs[i]; if(a.type==='walk'&&b.type==='walk'){ const m={type:'walk',from:a.from,to:b.to,dur:a.dur+(a.xfer?MIN_XFER:0)+b.dur,xfer:b.xfer};
+      try{ const pa=a.from==='orig'?[state.from.x,state.from.y]:markerPos(a.from), pb=b.to==='dest'?[state.to.x,state.to.y]:markerPos(b.to); const wp=walkPath(pa[0],pa[1],pb[0],pb[1]); if(wp&&wp.len){ const d=streetSec(wp.len); if(d<m.dur) m.dur=d; } }catch(e){}
+      legs.splice(i-1,2,m); } }
   // same line continuing (URBS splits some runs at timing points): mark as "stay on board"
   for(let i=0;i<legs.length;i++){ const a=legs[i]; if(a.type!=='ride')continue; let j=i+1; while(j<legs.length&&legs[j].type==='walk'&&legs[j].dur<45)j++; const b=legs[j];
     if(b&&b.type==='ride'&&D.pats[a.p].route===D.pats[b.p].route&&b.dep-a.arr<=240&&SNAME[D.pats[a.p].stops[a.toPos]]===SNAME[D.pats[b.p].stops[b.fromPos]]){ b.cont=true; for(let k=i+1;k<j;k++)legs[k].hide=true; } }
@@ -737,6 +745,7 @@ function legPoints(l){
     const S=D.pats[l.p].stops; const stopsPts=[]; for(let i=l.fromPos;i<=l.toPos;i++) stopsPts.push(P(S[i]));
     const res=snapToShape(D.pats[l.p].route, stopsPts)||stopsPts; legCache.set(key,res); return res; }
   const a=l.from==='orig'?[state.from.x,state.from.y]:markerPos(l.from); const b=l.to==='dest'?[state.to.x,state.to.y]:markerPos(l.to);
+  if(l.from!=='orig'&&l.to!=='dest'&&stopGroup[l.from]===stopGroup[l.to]&&Math.hypot(a[0]-b[0],a[1]-b[1])<200){ const r=[a,b]; r.len=Math.hypot(a[0]-b[0],a[1]-b[1])*1.2; return r; }   // same stop, other side / other platform
   const w=walkPath(a[0],a[1],b[0],b[1]); return w||[a,b];
 }
 // Follow the route's drawn shape through a sequence of stops. A shape can pass the same street twice (loops,
@@ -847,13 +856,15 @@ $('go').onclick=()=>{ if(!state.from||!state.to){ toast('Set both start and dest
 function shiftItin(it,sh){ it.start+=sh; it.end+=sh; it.legs.forEach(l=>{ if(l.type==='ride'){l.dep+=sh;l.arr+=sh;} else {l.start+=sh;l.end+=sh;} }); return it; }
 function itinWalk(it){ return it.legs.reduce((a,l)=>a+(l.type==='walk'&&!l.hide?l.dur:0),0); }
 function itinSig(it){ return it.legs.filter(l=>l.type==='ride'&&!l.cont).map(l=>D.routes[D.pats[l.p].route][0]+'@'+D.pats[l.p].stops[l.fromPos]).join('>'); }
+let PREF='best'; try{ PREF=localStorage.getItem('rc-pref')||'best'; }catch(e){}
+const PREFS=[['best','Best'],['fast','Fastest'],['xfer','Fewest transfers'],['walk','Least walking']];
 function plan(laterFrom){
   const q=queryTime(); const arrive=whenMode==='arrive'&&laterFrom==null; let t0=laterFrom!=null?laterFrom:q.sec; const T=arrive?q.sec:null;
   const o=state.from,d=state.to;
-  const access=(p)=>{ const near=nearStops(p.x,p.y,MAX_ACCESS);
-    const f=WG? streetDists(p.x,p.y,MAX_ACCESS*1.5) : null;
+  const access=(p,R=MAX_ACCESS)=>{ const near=nearStops(p.x,p.y,R);
+    const f=WG? streetDists(p.x,p.y,R*1.5) : null;
     if(!f) return near.map(([s,dd])=>[s,walkSec(dd)]);
-    const out=[]; for(const [s,dd] of near){ const m=f(s); if(m===null) out.push([s,walkSec(dd)]); else if(m<=MAX_ACCESS*1.5) out.push([s,streetSec(m)]); }   // too far by street: left out
+    const out=[]; for(const [s,dd] of near){ const m=f(s); if(m===null) out.push([s,walkSec(dd)]); else if(m<=R*1.5) out.push([s,streetSec(m)]); }   // too far by street: left out
     return out; };
   const os=access(o), ds=access(d);
   const day=dayType(q.date).k, pday=dayType(prevDate(q.date)).k;
@@ -875,6 +886,8 @@ function plan(laterFrom){
   const firstLines=top.map(it=>{ const l=it.legs.find(l=>l.type==='ride'); return l?D.pats[l.p].route:null; }).filter(x=>x!=null);
   const uniq=[...new Set(firstLines)]; if(uniq.length) { const alt=run(t0,new Set(uniq)); all.push(...alt);
     const a2=alt.sort((a,b)=>a.end-b.end)[0]; const l2=a2&&a2.legs.find(l=>l.type==='ride'); if(l2) all.push(...run(t0,new Set([...uniq,D.pats[l2.p].route]))); }
+  if(PREF==='walk'){ const os2=access(o,350), ds2=access(d,350); if(os2.length&&ds2.length){ let c=raptor(os2,ds2,arrive?t0:t0,day,5); all.push(...c); for(let k=0;k<2&&c.length;k++){ const f=c.filter(i=>i.rides).sort((a,b)=>a.start-b.start)[0]; if(!f)break; c=raptor(os2,ds2,f.start+60,day,5); all.push(...c); } } }
+  if(PREF==='xfer'){ all.push(...run(t0).filter(i=>i.rides<=2)); }
   // clean up: drop duplicates and trips that are worse in every way than another one
   const seen=new Map(); let list=[];
   for(const it of all){ if(!it.rides) continue; const k=itinSig(it)+'|'+it.start; if(seen.has(k)) continue; seen.set(k,1); it.walk=itinWalk(it); list.push(it); }
@@ -884,13 +897,17 @@ function plan(laterFrom){
     return y.rides<=x.rides&&y.walk<=x.walk+60&&y.end<=x.end-600&&y.start>=x.start-60; };   // a different set of lines stays unless beaten by 10+ min
   list=list.filter(x=>!list.some(y=>worse(x,y)));
   if(arrive) list=list.filter(i=>i.end<=T);
-  const bestEnd=Math.min(...list.map(i=>i.end)); if(!arrive) list=list.filter(i=>i.end<=bestEnd+40*60);
+  const bestEnd=Math.min(...list.map(i=>i.end)); if(!arrive) list=list.filter(i=>i.end<=bestEnd+(PREF==='best'||PREF==='fast'?40:75)*60);
   // at most 2 departures of the same combination of lines
   const perSig=new Map(); list.sort(arrive?((a,b)=>b.start-a.start):((a,b)=>a.end-b.end)); list=list.filter(i=>{ const s=itinSig(i).replace(/@\d+/g,''); const n=perSig.get(s)||0; perSig.set(s,n+1); return n<2; });
   const wpath=walkPath(o.x,o.y,d.x,d.y); const wd=wpath&&wpath.len? streetSec(wpath.len) : directWalk(o.x,o.y,d.x,d.y);
   const ws=arrive?T-wd:t0;
   if(wd<45*60 && !(list.length && (arrive? Math.max(...list.map(i=>i.start))>ws+600 : Math.min(...list.map(i=>i.end))<t0+wd-600))) list.push({walkOnly:true,start:ws,end:ws+wd,walk:wd,legs:[{type:'walk',from:'orig',to:'dest',dur:wd,start:ws,end:ws+wd}],rides:0});
-  const score=arrive? (it=>-it.start+Math.max(0,it.rides-1)*300+it.walk*0.3) : (it=>it.end+Math.max(0,it.rides-1)*300+it.walk*0.3);
+  const base=arrive? (it=>-it.start) : (it=>it.end);
+  const score= PREF==='fast'? base
+    : PREF==='xfer'? (it=>(it.walkOnly?0:Math.max(0,it.rides-1))*100000+base(it)+it.walk*0.2)
+    : PREF==='walk'? (it=>Math.round(it.walk/120)*100000+base(it))
+    : (it=>base(it)+Math.max(0,it.rides-1)*300+it.walk*0.3);
   list.sort((a,b)=>score(a)-score(b)); list=list.slice(0,8);
   // labels
   const tr=list.filter(i=>!i.walkOnly);
@@ -914,7 +931,8 @@ function renderResults(){
     $('back').onclick=()=>{ state.view='list'; renderResults(); };
     b.querySelectorAll('.stopsBtn').forEach(btn=>btn.onclick=()=>{ const k=+btn.dataset.k; if(!state.openLegs) state.openLegs=new Set(); state.openLegs.has(k)?state.openLegs.delete(k):state.openLegs.add(k); const st=b.scrollTop; renderResults(); b.scrollTop=st; });
     draw(); return; }
-  b.innerHTML=`<div class="lhint">${state.itins.length} option${state.itins.length>1?'s':''}${state.arriveBy!=null?' arriving by '+fmt(state.arriveBy):''} · tap one for details</div>`+state.itins.map((it,i)=>{
+  const prefBar=`<div class="prefs">${PREFS.map(([k,l])=>`<button class="pchip ${k===PREF?'on':''}" data-p="${k}">${l}</button>`).join('')}</div>`;
+  b.innerHTML=prefBar+`<div class="lhint">${state.itins.length} option${state.itins.length>1?'s':''}${state.arriveBy!=null?' arriving by '+fmt(state.arriveBy):''} · tap one for details</div>`+state.itins.map((it,i)=>{
     const firstRide=it.legs.find(l=>l.type==='ride');
     return `<div class="opt ${i===state.sel?'sel':''}" data-i="${i}"><div class="top"><span class="tt">${fmt(it.start)} → ${fmt(it.end)}</span>${it.tag?`<span class="otag">${it.tag}</span>`:''}</div>
       <div class="dur" style="margin-top:2px">${itinMeta(it)}</div>
@@ -925,6 +943,7 @@ function renderResults(){
     el.onclick=()=>{ state.sel=+el.dataset.i; state.view='detail'; state.openLegs=new Set(); renderResults(); $('body').scrollTop=0; fitItin(); };
     el.onmouseenter=()=>{ if(state.view!=='list')return; state.sel=+el.dataset.i; b.querySelectorAll('.opt').forEach(o=>o.classList.toggle('sel',o===el)); draw(); };
   });
+  b.querySelectorAll('.pchip').forEach(c=>c.onclick=()=>{ PREF=c.dataset.p; try{ localStorage.setItem('rc-pref',PREF); }catch(e){} plan(state.arriveBy!=null?null:state.t0); });
   $('later').onclick=()=>{ const f=state.itins.filter(it=>!it.walkOnly).sort((a,b)=>a.start-b.start)[0]; plan(f? f.start+60 : state.t0+600); };
   $('earlier').onclick=()=>{ plan(Math.max(0,state.t0-30*60)); };
   draw();
