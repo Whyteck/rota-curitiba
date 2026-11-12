@@ -250,7 +250,7 @@ button{ -webkit-tap-highlight-color:transparent }
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-12.4";
+const APP_VERSION="2026-11-12.5";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -627,7 +627,7 @@ function refineFootpaths(){ let i=0; const step=()=>{ const t=performance.now();
         const st=Math.hypot(SX[s]-SX[j],SY[s]-SY[j]); if(stopGroup[j]===stopGroup[s] && st<200) m=Math.min(m,st*1.2);   // platforms of one terminal/station: walk inside it
         if(m<=MAX_XFER*1.6) out.push(j, streetSec(m)+MIN_XFER); }
       foot[s]=out; }
-    if(i<N) setTimeout(step,0); else window.footRefined=performance.now(); };
+    if(i<N) setTimeout(step,0); else { window.footRefined=performance.now(); if(window._restored && state.from && state.to && state.itins.length){ const sel=state.sel, v=state.view, ol=state.openLegs; const cam={...view}; restoring=true; plan(state.arriveBy!=null?null:state.t0); state.sel=Math.min(sel,state.itins.length-1); state.view=v; state.openLegs=ol; renderResults(); stopCam(); Object.assign(view,cam); state.reveal=null; draw(); restoring=false; window._restored=false; } } };
   step(); }
 /* ---- background map (OpenStreetMap streets, parks, water) ---- */
 let BM=null;
@@ -947,8 +947,29 @@ document.querySelectorAll('.pick').forEach(b=>b.onclick=()=>setPicking(state.pic
     if(tgt===sn[0]){ setH(sn[0]); requestAnimationFrame(()=>P.classList.add('collapsed')); } else { P.classList.remove('collapsed'); setH(tgt); } };
   head.addEventListener('pointerup',end); head.addEventListener('pointercancel',end);
 })();
-function setPoint(which,pt){ state[which]=pt; $(which+'In').value=pt?pt.label:''; state.stopSel=null; draw(); if(state.from&&state.to) plan(); }
-$('swap').onclick=()=>{ const sb=$('swap'); sb.classList.toggle('spin'); const a=state.from; state.from=state.to; state.to=a; $('fromIn').value=state.from?state.from.label:''; $('toIn').value=state.to?state.to.label:''; if(state.from&&state.to)plan(); else draw(); };
+/* ---- remember the trip across visits (this device only) ---- */
+let restoring=false;
+function saveTrip(){ if(restoring) return; try{
+  const p=v=>v?{x:Math.round(v.x),y:Math.round(v.y),label:v.label}:null;
+  localStorage.setItem('rc-trip',JSON.stringify({from:p(state.from),to:p(state.to),when:whenMode,date:$('date').value,time:$('time').value,pref:PREF,
+    sel:state.sel,view:state.view||'list',open:state.openLegs?[...state.openLegs]:[],cam:{x:Math.round(view.x),y:Math.round(view.y),s:view.s},saved:Date.now()})); }catch(e){} }
+function restoreTrip(){ let s=null; try{ s=JSON.parse(localStorage.getItem('rc-trip')||'null'); }catch(e){} if(!s) return false;
+  if(Date.now()-(s.saved||0)>3*864e5) return false;               // older than 3 days: start fresh
+  restoring=true;
+  try{
+    if(s.from){ state.from=s.from; $('fromIn').value=s.from.label; } if(s.to){ state.to=s.to; $('toIn').value=s.to.label; }
+    if(s.when&&s.when!=='now'){ const b=$('when').querySelector(`button[data-v="${s.when}"]`); if(b){ b.click(); if(s.date) $('date').value=s.date; if(s.time) $('time').value=s.time; updDay(); } }
+    if(s.pref) PREF=s.pref;
+    if(state.from&&state.to){ plan();
+      if(state.itins.length){ state.sel=Math.min(Math.max(0,s.sel|0),state.itins.length-1); state.view=s.view==='detail'?'detail':'list'; state.openLegs=new Set(s.open||[]); renderResults(); }
+      if(s.cam&&isFinite(s.cam.x)){ stopCam(); view.x=s.cam.x; view.y=s.cam.y; view.s=s.cam.s; userMoved=true; draw(); } else if(state.sel>=0) fitItin();
+      state.reveal=null; }
+  }catch(e){ console.warn('restore',e); }
+  restoring=false; window._restored=!!(state.from&&state.to); return true; }
+let _saveT=null; function saveSoon(){ clearTimeout(_saveT); _saveT=setTimeout(saveTrip,400); }
+addEventListener('pagehide',saveTrip); document.addEventListener('visibilitychange',()=>{ if(document.hidden) saveTrip(); });
+function setPoint(which,pt){ state[which]=pt; $(which+'In').value=pt?pt.label:''; state.stopSel=null; draw(); if(state.from&&state.to) plan(); saveSoon(); }
+$('swap').onclick=()=>{ saveSoon(); const sb=$('swap'); sb.classList.toggle('spin'); const a=state.from; state.from=state.to; state.to=a; $('fromIn').value=state.from?state.from.label:''; $('toIn').value=state.to?state.to.label:''; if(state.from&&state.to)plan(); else draw(); };
 function setupSearch(which){
   const inp=$(which+'In'), box=$(which+'Sugg'); let items=[], act=-1;
   const meItem=()=>({label:'My location',sub:state.me?(state.me.src==='gps'?'From your device':'Set on this device · tap ◎ on the map to change'):'Tap the map once to set where you are',x:state.me?state.me.x:0,y:state.me?state.me.y:0,kind:'me',sc:-99});
@@ -1057,7 +1078,7 @@ function fitItin(){ const it=state.itins[state.sel]; state.reveal={it,t:performa
 function lineChip(ri){ const r=D.routes[ri]; return `<span class="chip" style="background:${r[2]};color:${r[4]||'#fff'}">${esc(r[0])}</span>`; }
 function itinChips(it){ return it.legs.filter(l=>(l.type==='ride'&&!l.cont)||(l.type==='walk'&&!l.hide&&l.dur>=120)).map(l=> l.type==='ride'? `<span class="cg">${lineChip(D.pats[l.p].route)}<span class="lname">${esc(D.routes[D.pats[l.p].route][1])}</span></span>` : `<span class="chip walk">🚶 ${Math.round(l.dur/60)}</span>`).join('<span class="arrow">›</span>'); }
 function itinMeta(it){ const tx=it.rides>1?(it.rides-1)+' transfer'+(it.rides>2?'s':''):(it.rides===1?'direct':''); const w=Math.round((it.walk||0)/60); return [durTxt(it.end-it.start),tx,w?w+' min walk':''].filter(Boolean).join(' · '); }
-function renderResults(){
+function renderResults(){ saveSoon();
   const b=$('body');
   if(!state.itins.length){ b.innerHTML=state.arriveBy!=null?`<div class="msg">No trip found that arrives by ${fmt(state.arriveBy)} on this day. Try a later arrival time.</div>`:`<div class="msg">No bus connection found from ${fmt(state.t0)} on this day. Try a later time, or a start or destination closer to a bus stop (within ${MAX_ACCESS} m).</div>`; draw(); return; }
   if(state.view==='detail'){ const it=state.itins[state.sel];
@@ -1214,9 +1235,10 @@ setTimeout(checkUpdate,1500); document.addEventListener('visibilitychange',()=>{
   $('loading').classList.add('hide'); initTime(); resize(); updSeg();
   loadPlaces(); loadBasemap().then(loadWalk);
   startGPS(null);
-  if(state.me && !state.from){ state.from={x:state.me.x,y:state.me.y,label:'My location'}; $('fromIn').value='My location'; }
-  // initial view: whole network
+  // initial view: whole network, unless a saved trip brings its own
   initialFit();
+  restoreTrip();
+  if(state.me && !state.from){ state.from={x:state.me.x,y:state.me.y,label:'My location'}; $('fromIn').value='My location'; }
 })();
 addEventListener('resize',resize);
 try{ new ResizeObserver(resize).observe(cv); }catch(e){}
