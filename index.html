@@ -250,7 +250,7 @@ button{ -webkit-tap-highlight-color:transparent }
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-12.2";
+const APP_VERSION="2026-11-12.3";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -1030,18 +1030,26 @@ function plan(laterFrom){
   const perSig=new Map(); list.sort(arrive?((a,b)=>b.start-a.start):((a,b)=>a.end-b.end)); list=list.filter(i=>{ const s=itinSig(i).replace(/@\d+/g,''); const n=perSig.get(s)||0; perSig.set(s,n+1); return n<2; });
   const wpath=walkPath(o.x,o.y,d.x,d.y); const wd=wpath&&wpath.len? streetSec(wpath.len) : directWalk(o.x,o.y,d.x,d.y);
   const ws=arrive?T-wd:t0;
-  if(wd<45*60 && !(list.length && (arrive? Math.max(...list.map(i=>i.start))>ws+600 : Math.min(...list.map(i=>i.end))<t0+wd-600))) list.push({walkOnly:true,start:ws,end:ws+wd,walk:wd,legs:[{type:'walk',from:'orig',to:'dest',dur:wd,start:ws,end:ws+wd}],rides:0});
+  if(wd<60*60) list.push({walkOnly:true,start:ws,end:ws+wd,walk:wd,legs:[{type:'walk',from:'orig',to:'dest',dur:wd,start:ws,end:ws+wd}],rides:0});
   const base=arrive? (it=>-it.start) : (it=>it.end);
   const score= PREF==='fast'? base
     : PREF==='xfer'? (it=>(it.walkOnly?0:Math.max(0,it.rides-1))*100000+base(it)+it.walk*0.2)
     : PREF==='walk'? (it=>Math.round(it.walk/120)*100000+base(it))
     : (it=>base(it)+Math.max(0,it.rides-1)*300+it.walk*0.3);
-  list.sort((a,b)=>score(a)-score(b)); list=list.slice(0,8);
+  // walking the whole way: first for short distances, and buses that barely beat it are not worth it
+  const wo=list.find(i=>i.walkOnly);
+  if(wo){ const gain=it=> arrive? (it.start-wo.start) : (wo.end-it.end);      // seconds saved by taking the bus
+    const bestGain=Math.max(0,...list.filter(i=>!i.walkOnly).map(gain));
+    if(PREF==='best'){ list=list.filter(i=>i.walkOnly || gain(i)>=180); wo.top = wd<=15*60 || bestGain<300; }
+    else if(PREF==='fast'||PREF==='xfer'){ if(bestGain>=10*60 && wd>25*60) list=list.filter(i=>!i.walkOnly); }
+    else if(PREF==='walk' && list.length>1) list=list.filter(i=>!i.walkOnly || wd<=15*60); }
+  list.sort((a,b)=>(b.top?1:0)-(a.top?1:0) || score(a)-score(b)); list=list.slice(0,8);
   // labels
   const tr=list.filter(i=>!i.walkOnly);
   if(tr.length){ const f=arrive? tr.reduce((a,b)=>b.start>a.start?b:a) : tr.reduce((a,b)=>b.end<a.end?b:a); f.tag=arrive?'Latest departure':'Fastest';
     const m=Math.min(...tr.map(i=>i.rides)); const fe=tr.filter(i=>i.rides===m).reduce((a,b)=>b.end<a.end?b:a); if(!fe.tag && tr.some(i=>i.rides>m)) fe.tag='Fewest transfers';
     const lw=tr.reduce((a,b)=>b.walk<a.walk?b:a); if(!lw.tag && tr.some(i=>i.walk>lw.walk+120)) lw.tag='Least walking'; }
+  if(wo&&list.includes(wo)&&wo.top) wo.tag='Just walk';
   state.itins=list; state.sel=list.length?0:-1; state.view='list'; state.stopSel=null; state.expanded=null; state.t0=t0; state.arriveBy=T; state.qdate=q.date;
   renderResults(); if(state.sel>=0) fitItin();
 }
