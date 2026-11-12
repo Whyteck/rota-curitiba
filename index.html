@@ -157,7 +157,7 @@ button,input,select{font:inherit;color:inherit}
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-11.14";
+const APP_VERSION="2026-11-12.1";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -545,8 +545,8 @@ async function loadBasemap(){
     BM={layers,labels}; draw();
   }catch(e){ console.warn('basemap',e); }
 }
-const BM_LIGHT={ bg:'#f2efe9', water:'#aad3df', park:'#cfe6bf', wood:'#bcd9a8', cem:'#d6e2cc', casing:'#d6d0c2', majCase:'#e2c37a', major:'#fbe1a0', sec:'#fff3c9', road:'#ffffff', label:'#6b6458', halo:'rgba(255,255,255,.9)' };
-const BM_DARK ={ bg:'#161b1a', water:'#1d3a4a', park:'#1b2c22', wood:'#1a2a1f', cem:'#1f2a23', casing:'#0f1312', majCase:'#0f1312', major:'#6b5a2e', sec:'#4d5552', road:'#363e3b', label:'#a7b0ab', halo:'rgba(18,22,21,.9)' };
+const BM_LIGHT={ bg:'#f2efe9', water:'#aad3df', park:'#cfe6bf', wood:'#bcd9a8', cem:'#d6e2cc', casing:'#cbc3b2', majCase:'#d9b35d', major:'#fbd98a', sec:'#fff0b8', road:'#ffffff', label:'#575045', halo:'rgba(255,255,255,.9)' };
+const BM_DARK ={ bg:'#14191a', water:'#21506a', park:'#1f3d2a', wood:'#1c3826', cem:'#243329', casing:'#0b0e0e', majCase:'#2a2416', major:'#a5853f', sec:'#6d7773', road:'#4c5652', label:'#c9d2cd', halo:'rgba(14,18,18,.95)' };
 const BMSTYLE=Object.assign({},BM_LIGHT);
 const MS_LIGHT={ net:'#8d948f', stopFill:'#ffffff', stopLine:'#59625d', stopText:'#3a403c', ink:'#1b1f1d', halo:'#ffffff', walk:'#4d5560', pinLine:'#ffffff' };
 const MS_DARK ={ net:'#7c8682', stopFill:'#181d1b', stopLine:'#9aa4a0', stopText:'#c9d1cd', ink:'#e7ece9', halo:'#121615', walk:'#b5bec8', pinLine:'#121615' };
@@ -560,7 +560,7 @@ function drawBasemap(){
   const line=(k,c,px)=>{ if(L[k]&&px>0.25){ ctx.strokeStyle=c; ctx.lineWidth=px/s; ctx.stroke(L[k]); } };
   line(5,BMSTYLE.water,Math.min(2,0.8+s*2)); line(4,BMSTYLE.water,Math.min(6,1.2+s*6));
   // road widths in screen px by zoom
-  const wMaj=Math.min(12,1.4+s*11), wSec=Math.min(10,1+s*9), wTer=Math.min(8,0.6+s*7.5), wRes=s>0.07?Math.min(6.5,s*6.5):0;
+  const wMaj=Math.min(12,1.8+s*11), wSec=Math.min(10,1.4+s*9), wTer=Math.min(8,1+s*7.5), wRes=s>0.05?Math.min(6.5,0.8+s*6):0;
   if(wRes>0.4){ line(3,BMSTYLE.casing,wRes+1.2); }
   line(2,BMSTYLE.casing,wTer+(s>0.15?1.2:0)); line(1,BMSTYLE.casing,wSec+1.2); line(0,BMSTYLE.majCase,wMaj+1.4);
   if(wRes>0.4) line(3,BMSTYLE.road,wRes);
