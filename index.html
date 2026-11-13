@@ -251,7 +251,7 @@ button{ -webkit-tap-highlight-color:transparent }
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-13.2";
+const APP_VERSION="2026-11-13.3";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
@@ -1008,6 +1008,7 @@ function itinWalk(it){ return it.legs.reduce((a,l)=>a+(l.type==='walk'&&!l.hide?
 function itinSig(it){ return it.legs.filter(l=>l.type==='ride'&&!l.cont).map(l=>D.routes[D.pats[l.p].route][0]+'@'+D.pats[l.p].stops[l.fromPos]).join('>'); }
 let PREF='best'; try{ PREF=localStorage.getItem('rc-pref')||'best'; }catch(e){}
 const PREFS=[['best','Best'],['fast','Fastest'],['xfer','Fewest transfers'],['walk','Least walking']];
+function placeGroup(p){ if(!p||!p.label||!searchIdx) return null; const g=searchIdx.find(g=>g.name===p.label && Math.hypot(g.x-p.x,g.y-p.y)<60); return g&&g.stops.length>1?g:null; }
 function plan(laterFrom){
   const q=queryTime(); const arrive=whenMode==='arrive'&&laterFrom==null; let t0=laterFrom!=null?laterFrom:q.sec; const T=arrive?q.sec:null;
   const o=state.from,d=state.to;
@@ -1015,6 +1016,8 @@ function plan(laterFrom){
     const f=WG? streetDists(p.x,p.y,R*1.5) : null;
     if(!f) return near.map(([s,dd])=>[s,walkSec(dd)]);
     const out=[]; for(const [s,dd] of near){ const m=f(s); if(m===null) out.push([s,walkSec(dd)]); else if(m<=R*1.5) out.push([s,streetSec(m)]); }   // too far by street: left out
+    // a terminal / station chosen as start or end: all its platforms count as being there
+    const g=placeGroup(p); if(g){ const inG=new Set(g.stops); for(const e of out) if(inG.has(e[0])) e[1]=0; for(const s of g.stops) if(!out.some(e=>e[0]===s)) out.push([s,0]); }
     return out; };
   const os=access(o), ds=access(d);
   const day=dayType(q.date).k, pday=dayType(prevDate(q.date)).k;
@@ -1116,6 +1119,7 @@ function legsHTML(it){
     if(l.type==='walk'){
       if(l.dur<30 && l.from!=='orig' && l.to!=='dest') return;
       if(l.from==='orig' && l.dur<45) return;
+      if(l.to==='dest' && l.dur<45) return;
       const to=l.to==='dest'? state.to.label : SNAME[l.to];
       const from=l.from==='orig'? state.from.label : SNAME[l.from];
       const same=from===to; const wp=legPoints(l); const m=Math.round(((wp&&wp.len)||l.dur*WALK/DETOUR)/10)*10;
@@ -1136,7 +1140,7 @@ function legsHTML(it){
       h+=`<div class="leg"><div class="t">${fmt(last.arr)}</div><div class="bar end" style="--c:${r[2]}"></div><div class="d"><b>Get off at ${esc(SNAME[PL.stops[last.toPos]])}</b></div></div>`;
     }
   });
-  h+=`<div class="leg"><div class="t">${fmt(it.end)}</div><div class="bar end" style="--c:#c0392b"></div><div class="d"><b>${esc(state.to.label)}</b></div></div></div>`;
+  const lastW=[...L].reverse().find(l=>!l.hide); if(!(lastW&&lastW.type==='walk'&&lastW.to==='dest'&&lastW.dur<45)) h+=`<div class="leg"><div class="t">${fmt(it.end)}</div><div class="bar end" style="--c:#c0392b"></div><div class="d"><b>${esc(state.to.label)}</b></div></div></div>`;
   return h;
 }
 function nextTrips(P,day,pos,t,n){ const T=P.T[day]; const out=[]; for(let i=0;i<T.st.length;i++){ const tt=T.tm[i*T.L+pos]; if(tt>=t) out.push(tt);} out.sort((a,b)=>a-b); return out.slice(0,n); }
