@@ -93,7 +93,8 @@ button,input,select{font:inherit;color:inherit}
 .leg.mid{font-size:12px;color:var(--muted)}
 .leg.mid .t{font-weight:500;color:var(--muted)}
 .leg.mid .d{padding-bottom:7px}
-.leg.mid .bar:after{width:6px;height:6px;left:4px;top:5px;border-width:2px}
+.leg.mid .bar:after{width:8px;height:8px;left:7px;top:8px;transform:translate(-50%,-50%);border:0;background:var(--c,#999);box-shadow:0 0 0 2px var(--panel)}
+.leg.mid .bar:before{top:-6px}
 .next{color:var(--muted);font-size:12px}
 .more{display:flex;gap:6px;justify-content:center;margin:8px 10px}
 .dep{display:flex;align-items:flex-start;gap:8px;padding:8px 14px;border-top:1px solid var(--sep)}
@@ -250,7 +251,7 @@ button{ -webkit-tap-highlight-color:transparent }
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-12.5";
+const APP_VERSION="2026-11-13.1";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
