@@ -82,9 +82,9 @@ button,input,select{font:inherit;color:inherit}
 .leg{display:grid;grid-template-columns:44px 14px 1fr;gap:0 8px;font-size:13px}
 .leg .t{font-variant-numeric:tabular-nums;font-weight:600;padding-top:1px}
 .leg .bar{position:relative}
-.leg .bar:before{content:"";position:absolute;left:5px;top:6px;bottom:-6px;width:4px;border-radius:2px;background:var(--c,#ccc)}
-.leg .bar.walk:before{background:repeating-linear-gradient(var(--walk) 0 3px,transparent 3px 6px);width:2px;left:6px}
-.leg .bar:after{content:"";position:absolute;left:2px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--dot);border:2px solid var(--c,#999)}
+.leg .bar:before{content:"";position:absolute;left:7px;transform:translateX(-50%);top:6px;bottom:-6px;width:4px;border-radius:2px;background:var(--c,#ccc)}
+.leg .bar.walk:before{background:repeating-linear-gradient(var(--walk) 0 3px,transparent 3px 6px);width:2px;left:7px}
+.leg .bar:after{content:"";position:absolute;left:7px;top:9px;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:var(--dot);border:2.5px solid var(--c,#999);box-sizing:border-box}
 .leg .bar.end:before{display:none}
 .leg .d{padding-bottom:12px}
 .leg .d b{font-weight:600}
@@ -251,7 +251,7 @@ button{ -webkit-tap-highlight-color:transparent }
 
 <script>
 "use strict";
-const APP_VERSION="2026-11-13.1";
+const APP_VERSION="2026-11-13.2";
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const TZ = 'America/Sao_Paulo';
